@@ -1,15 +1,20 @@
+
 import React, { useState, useEffect, useMemo, Suspense } from 'react';
 import { createRoot } from 'react-dom/client';
-import { Article, Source, ArticleMetadata } from './types';
-import { getAllData, saveArticleToDB, saveFileToDB, saveSourceToDB, getFileFromDB, deleteSourceFromDB, deleteArticleFromDB, deleteFileFromDB, clearDatabase, restoreSession } from './db';
+import { Article, Source, ArticleMetadata, Note, NoteType } from './types';
+import { getAllData, saveArticleToDB, saveFileToDB, saveSourceToDB, saveNoteToDB, getFileFromDB, deleteSourceFromDB, deleteArticleFromDB, deleteFileFromDB, deleteNoteFromDB, clearDatabase, restoreSession } from './db';
 import { Sidebar } from './components/Sidebar';
 import { ArticleList } from './components/ArticleList';
 import { ArticleDetail } from './components/ArticleDetail';
 import { SettingsModal, ThemeOption } from './components/SettingsModal';
+import { NotebookModal } from './components/NotebookModal';
+import { NoteViewerModal } from './components/NoteViewerModal';
+import { NotebookEditor } from './components/NotebookEditor';
 
 const LibrarianApp = () => {
   const [sources, setSources] = useState<Source[]>([]);
   const [articles, setArticles] = useState<Article[]>([]);
+  const [notes, setNotes] = useState<Note[]>([]);
   const [selectedArticleId, setSelectedArticleId] = useState<string | null>(null);
   const [searchQuery, setSearchQuery] = useState('');
   const [activeSourceId, setActiveSourceId] = useState<string | null>(null);
@@ -19,6 +24,12 @@ const LibrarianApp = () => {
   // Settings & Theme
   const [isSettingsOpen, setIsSettingsOpen] = useState(false);
   const [theme, setTheme] = useState<ThemeOption>('default');
+
+  // Notebook State
+  const [isNotebookSetupOpen, setIsNotebookSetupOpen] = useState(false);
+  const [selectedNote, setSelectedNote] = useState<Note | null>(null);
+  const [activeEditorNote, setActiveEditorNote] = useState<Partial<Note> | null>(null);
+  const [isEditingNote, setIsEditingNote] = useState(false);
 
   // Initialize theme
   useEffect(() => {
@@ -53,10 +64,10 @@ const LibrarianApp = () => {
   useEffect(() => {
     const initSession = async () => {
       try {
-        // Clear persistent storage on startup to ensure a fresh session
         await clearDatabase();
         setSources([]);
         setArticles([]);
+        setNotes([]);
       } catch (err) {
         console.error("Failed to initialize session", err);
       }
@@ -277,13 +288,94 @@ const LibrarianApp = () => {
     });
   };
 
+  const handleSetupNote = (type: NoteType, targetId?: string) => {
+    setIsEditingNote(false);
+    setActiveEditorNote({
+        type,
+        targetId,
+        content: '',
+        title: `Note ${Date.now().toString().slice(-4)}`
+    });
+  };
+
+  const handleSaveNote = async (noteData: Partial<Note>) => {
+    let newNote: Note;
+    if (isEditingNote && noteData.id) {
+        // Update existing
+        const existing = notes.find(n => n.id === noteData.id);
+        if (!existing) return;
+        newNote = { ...existing, ...noteData } as Note;
+    } else {
+        // Create new
+        newNote = {
+            id: crypto.randomUUID(),
+            createdAt: Date.now(),
+            title: noteData.title || 'Untitled Note',
+            content: noteData.content || '',
+            type: noteData.type || 'general',
+            targetId: noteData.targetId
+        };
+    }
+
+    await saveNoteToDB(newNote);
+    setNotes(prev => {
+        if (isEditingNote) {
+            return prev.map(n => n.id === newNote.id ? newNote : n);
+        } else {
+            return [...prev, newNote];
+        }
+    });
+
+    // If we were editing the currently viewed note, update it too
+    if (selectedNote && selectedNote.id === newNote.id) {
+        setSelectedNote(newNote);
+    }
+  };
+
+  const handleUpdateNoteTitle = async (id: string, newTitle: string) => {
+      const noteIndex = notes.findIndex(n => n.id === id);
+      if (noteIndex === -1) return;
+
+      const updatedNote = { ...notes[noteIndex], title: newTitle };
+      await saveNoteToDB(updatedNote);
+      setNotes(prev => {
+          const newArr = [...prev];
+          newArr[noteIndex] = updatedNote;
+          return newArr;
+      });
+      // Important: Update the view modal if it is displaying this note
+      if (selectedNote && selectedNote.id === id) {
+          setSelectedNote(updatedNote);
+      }
+  };
+
+  const handleDeleteNote = async (id: string) => {
+      try {
+        await deleteNoteFromDB(id);
+        setNotes(prev => prev.filter(n => n.id !== id));
+        if (selectedNote && selectedNote.id === id) {
+            setSelectedNote(null);
+        }
+      } catch (e) {
+        console.error("Failed to delete note", e);
+        alert("Failed to delete note.");
+      }
+  };
+
+  const handleEditNote = (note: Note) => {
+      setSelectedNote(null); // Close viewer if open
+      setIsEditingNote(true);
+      setActiveEditorNote(note); // Open editor with note data
+  };
+
   const handleSaveSession = async () => {
     try {
-      const { sources, articles } = await getAllData();
+      const { sources, articles, notes } = await getAllData();
       const session = {
         timestamp: Date.now(),
         sources,
-        articles
+        articles,
+        notes
       };
       const blob = new Blob([JSON.stringify(session, null, 2)], { type: 'application/json' });
       const url = URL.createObjectURL(blob);
@@ -304,6 +396,7 @@ const LibrarianApp = () => {
         await clearDatabase();
         setSources([]);
         setArticles([]);
+        setNotes([]);
         setSelectedArticleId(null);
         setActiveSourceId(null);
         setSearchQuery('');
@@ -339,9 +432,10 @@ const LibrarianApp = () => {
         await clearDatabase();
         
         // Restore
-        await restoreSession(session.sources, session.articles);
+        await restoreSession(session.sources, session.articles, session.notes || []);
         setSources(session.sources);
         setArticles(session.articles);
+        setNotes(session.notes || []);
         setSelectedArticleId(null);
         setActiveSourceId(null);
         setSearchQuery('');
@@ -418,6 +512,12 @@ const LibrarianApp = () => {
     return [...list]; // Return new array reference
   }, [articles, activeSourceId, searchQuery, sortConfig]);
 
+  const allCategories = useMemo(() => {
+      const cats = new Set<string>();
+      articles.forEach(a => a.metadata?.categories.forEach(c => cats.add(c)));
+      return Array.from(cats).sort();
+  }, [articles]);
+
   const selectedArticle = articles.find(a => a.id === selectedArticleId);
 
   return (
@@ -425,11 +525,13 @@ const LibrarianApp = () => {
       <Sidebar 
         sources={sources}
         articles={articles}
+        notes={notes}
         activeSourceId={activeSourceId}
         onSetActiveSource={setActiveSourceId}
         onAddSource={handleAddSource}
         onAddPDF={handleAddPDF}
         onOpenSettings={() => setIsSettingsOpen(true)}
+        onOpenNote={(note) => setSelectedNote(note)}
       />
 
       <ArticleList 
@@ -449,15 +551,55 @@ const LibrarianApp = () => {
 
       <ArticleDetail 
         article={selectedArticle}
+        notes={notes}
         onClose={() => setSelectedArticleId(null)}
         onUpdateMetadata={handleUpdateArticle}
+        onEditNote={handleEditNote}
+        onOpenNote={(note) => setSelectedNote(note)}
       />
+
+      {/* Floating Action Button for Notebook */}
+      <button 
+        onClick={() => setIsNotebookSetupOpen(true)}
+        className="fixed bottom-6 right-6 z-[40] p-4 bg-indigo-600 hover:bg-indigo-700 text-white rounded-full shadow-lg transition-transform hover:scale-110 active:scale-95 flex items-center justify-center group"
+        title="Open Notebook"
+      >
+        <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+           <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z" />
+        </svg>
+      </button>
 
       <SettingsModal 
         isOpen={isSettingsOpen}
         onClose={() => setIsSettingsOpen(false)}
         currentTheme={theme}
         onThemeChange={setTheme}
+      />
+
+      <NotebookModal 
+        isOpen={isNotebookSetupOpen}
+        onClose={() => setIsNotebookSetupOpen(false)}
+        articles={articles}
+        categories={allCategories}
+        onConfirm={handleSetupNote}
+      />
+
+      {activeEditorNote && (
+        <NotebookEditor 
+          isOpen={!!activeEditorNote}
+          initialData={activeEditorNote}
+          onClose={() => setActiveEditorNote(null)}
+          onSave={handleSaveNote}
+          isEditing={isEditingNote}
+        />
+      )}
+
+      <NoteViewerModal 
+        note={selectedNote}
+        onClose={() => setSelectedNote(null)}
+        onUpdateTitle={handleUpdateNoteTitle}
+        onDelete={handleDeleteNote}
+        onEdit={handleEditNote}
       />
 
       <style dangerouslySetInnerHTML={{ __html: `
@@ -488,6 +630,20 @@ const LibrarianApp = () => {
         }
         .dark ::-webkit-scrollbar-thumb:hover {
            background: #64748b;
+        }
+        
+        @keyframes fadeInUp {
+            from {
+                opacity: 0;
+                transform: translate3d(0, 20px, 0);
+            }
+            to {
+                opacity: 1;
+                transform: translate3d(0, 0, 0);
+            }
+        }
+        .animate-fade-in-up {
+            animation: fadeInUp 0.3s ease-out forwards;
         }
       `}} />
     </div>

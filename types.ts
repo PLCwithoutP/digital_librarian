@@ -23,3 +23,14 @@ export interface Source {
   name: string;
   path?: string;
 }
+
+export type NoteType = 'article' | 'general' | 'category';
+
+export interface Note {
+  id: string;
+  title: string;
+  type: NoteType;
+  targetId?: string; // Article ID or Category Name
+  content: string; // Markdown
+  createdAt: number;
+}

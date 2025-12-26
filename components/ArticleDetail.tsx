@@ -1,21 +1,34 @@
 
 import React, { useState } from 'react';
-import { Article, ArticleMetadata } from '../types';
+import ReactMarkdown from 'react-markdown';
+import { Article, ArticleMetadata, Note } from '../types';
 import { getFileFromDB } from '../db';
 
 interface ArticleDetailProps {
   article: Article | null | undefined;
+  notes?: Note[];
   onClose: () => void;
   onUpdateMetadata: (id: string, updates: Partial<ArticleMetadata>) => void;
+  onEditNote: (note: Note) => void;
+  onOpenNote: (note: Note) => void;
 }
 
-export const ArticleDetail: React.FC<ArticleDetailProps> = ({ article, onClose, onUpdateMetadata }) => {
+export const ArticleDetail: React.FC<ArticleDetailProps> = ({ 
+  article, 
+  notes = [], 
+  onClose, 
+  onUpdateMetadata,
+  onEditNote,
+  onOpenNote
+}) => {
   const [newKeyword, setNewKeyword] = useState('');
   const [newCategory, setNewCategory] = useState('');
 
   if (!article) return (
     <div className={`fixed inset-y-0 right-0 w-[450px] bg-white dark:bg-slate-900 shadow-2xl transform transition-transform duration-300 ease-in-out border-l border-slate-200 dark:border-slate-800 flex flex-col z-20 translate-x-full`}></div>
   );
+
+  const articleNotes = notes.filter(n => n.type === 'article' && n.targetId === article.id);
 
   const handleAddKeyword = (e: React.KeyboardEvent) => {
     if (e.key === 'Enter' && newKeyword.trim()) {
@@ -139,6 +152,41 @@ export const ArticleDetail: React.FC<ArticleDetailProps> = ({ article, onClose, 
                     onKeyDown={handleAddKeyword}
                 />
               </section>
+
+              {articleNotes.length > 0 && (
+                <section>
+                    <h4 className="text-xs font-bold text-slate-400 dark:text-slate-500 uppercase tracking-widest mb-3 flex items-center gap-2">
+                        <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z" />
+                        </svg>
+                        Attached Notes
+                    </h4>
+                    <div className="space-y-4">
+                        {articleNotes.map(note => (
+                            <div key={note.id} className="bg-amber-50 dark:bg-amber-900/10 border border-amber-100 dark:border-amber-900/30 rounded-lg p-4 group">
+                                <div className="flex justify-between items-start mb-2">
+                                    <div className="flex flex-col cursor-pointer hover:underline" onClick={() => onOpenNote(note)}>
+                                        <span className="text-xs font-bold text-amber-800 dark:text-amber-500 uppercase">{note.title}</span>
+                                        <span className="text-[10px] text-amber-600 dark:text-amber-600">{new Date(note.createdAt).toLocaleDateString()}</span>
+                                    </div>
+                                    <button 
+                                        onClick={() => onEditNote(note)}
+                                        className="opacity-0 group-hover:opacity-100 p-1 text-amber-600 hover:text-amber-800 dark:text-amber-500 dark:hover:text-amber-300 transition-opacity bg-amber-100 dark:bg-amber-900/50 rounded"
+                                        title="Edit Note"
+                                    >
+                                        <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15.232 5.232l3.536 3.536m-2.036-5.036a2.5 2.5 0 113.536 3.536L6.5 21.036H3v-3.572L16.732 3.732z" />
+                                        </svg>
+                                    </button>
+                                </div>
+                                <div className="prose prose-sm dark:prose-invert prose-amber max-w-none text-slate-800 dark:text-slate-200">
+                                    <ReactMarkdown>{note.content.replace(/\n/g, '  \n')}</ReactMarkdown>
+                                </div>
+                            </div>
+                        ))}
+                    </div>
+                </section>
+              )}
               
               <div className="pt-8 border-t border-slate-100 dark:border-slate-800">
                 <button 
