@@ -130,6 +130,19 @@ def parse_pdf(file_bytes_list, file_name):
         return json.dumps({"error": str(e)})
 `;
 
+const installWithRetry = async (micropip: any, pkg: string, retries = 3) => {
+  for (let i = 0; i < retries; i++) {
+    try {
+      await micropip.install(pkg);
+      return;
+    } catch (err) {
+      console.warn(`Attempt ${i + 1} failed to install ${pkg}:`, err);
+      if (i === retries - 1) throw err;
+      await new Promise(r => setTimeout(r, 1000));
+    }
+  }
+};
+
 export const initPyodide = async () => {
   if (pyodideReadyPromise) return pyodideReadyPromise;
 
@@ -141,12 +154,16 @@ export const initPyodide = async () => {
     console.log("Loading Pyodide...");
     pyodide = await window.loadPyodide();
     
+    // Load SSL which is sometimes needed for network operations
+    await pyodide.loadPackage("ssl");
+
     console.log("Loading Micropip...");
     await pyodide.loadPackage("micropip");
     const micropip = pyodide.pyimport("micropip");
     
     console.log("Installing pypdf...");
-    await micropip.install("pypdf");
+    // Pin version to ensure stability and compatibility
+    await installWithRetry(micropip, "pypdf==3.17.1");
     
     console.log("Loading Parser Script...");
     await pyodide.runPythonAsync(PYTHON_SCRIPT);
@@ -162,8 +179,6 @@ export const parsePdfWithPython = async (file: File | Blob, fileName: string): P
   const arrayBuffer = await file.arrayBuffer();
   const uint8Array = new Uint8Array(arrayBuffer);
   
-  // Expose the globals to Python temporarily or pass as args
-  // Ideally, call the function defined in global scope
   const parsePdf = pyodide.globals.get('parse_pdf');
   
   const resultJson = parsePdf(uint8Array, fileName);
