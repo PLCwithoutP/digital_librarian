@@ -23,6 +23,7 @@ export interface Source {
   id: string;
   name: string;
   path?: string;
+  parentId?: string; // For nested folders
 }
 
 export type NoteType = 'article' | 'general' | 'category';

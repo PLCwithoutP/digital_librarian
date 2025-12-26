@@ -1,5 +1,5 @@
 
-import React from 'react';
+import React, { useState, useEffect } from 'react';
 import { Source, Article, Note } from '../types';
 
 interface SidebarProps {
@@ -12,8 +12,97 @@ interface SidebarProps {
   onOpenGenerateModal: () => void;
   onOpenSettings: () => void;
   onOpenNote: (note: Note) => void;
+  onDeleteSource: (id: string) => void;
   isGenerateDisabled: boolean;
 }
+
+// Recursive Tree Node Component
+const SourceTreeItem: React.FC<{
+  source: Source;
+  allSources: Source[];
+  articles: Article[];
+  activeSourceId: string | null;
+  depth: number;
+  onSelect: (id: string) => void;
+  onDelete: (id: string) => void;
+}> = ({ source, allSources, articles, activeSourceId, depth, onSelect, onDelete }) => {
+  const [isExpanded, setIsExpanded] = useState(true);
+  
+  // Find children
+  const children = allSources.filter(s => s.parentId === source.id);
+  const hasChildren = children.length > 0;
+  
+  // Calculate count (including self)
+  // For hierarchical count (including subfolders), we'd need recursive counting.
+  // For now, let's show direct articles count, or simpler: direct articles.
+  const directArticleCount = articles.filter(a => a.sourceId === source.id).length;
+
+  return (
+    <div>
+      <div 
+        className={`w-full flex items-center justify-between group hover:bg-slate-800 transition-colors ${activeSourceId === source.id ? 'bg-slate-800 text-white' : 'text-slate-300'}`}
+        style={{ paddingLeft: `${depth * 12 + 12}px` }}
+      >
+        <div className="flex items-center gap-1 flex-1 min-w-0 py-2 cursor-pointer" onClick={() => onSelect(source.id)}>
+          {/* Expander Icon */}
+          <div 
+            onClick={(e) => {
+              e.stopPropagation();
+              setIsExpanded(!isExpanded);
+            }}
+            className={`p-1 rounded hover:bg-slate-700 ${hasChildren ? 'visible' : 'invisible'}`}
+          >
+             <svg className={`w-3 h-3 transition-transform ${isExpanded ? 'rotate-90' : ''}`} fill="none" stroke="currentColor" viewBox="0 0 24 24">
+               <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7" />
+             </svg>
+          </div>
+          
+          {/* Folder Icon */}
+          <svg className="w-4 h-4 shrink-0 text-slate-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+             <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M3 7v10a2 2 0 002 2h14a2 2 0 002-2V9a2 2 0 00-2-2h-6l-2-2H5a2 2 0 00-2 2z" />
+          </svg>
+          
+          <span className="truncate text-sm ml-1 select-none">{source.name}</span>
+          <span className="text-[10px] bg-slate-700 px-1.5 py-0.5 rounded-full ml-auto mr-2">
+            {directArticleCount}
+          </span>
+        </div>
+
+        {/* Delete Action */}
+        <button 
+          onClick={(e) => {
+            e.stopPropagation();
+            onDelete(source.id);
+          }}
+          className="p-2 text-slate-500 hover:text-red-400 opacity-0 group-hover:opacity-100 transition-opacity"
+          title="Delete Folder"
+        >
+          <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
+          </svg>
+        </button>
+      </div>
+      
+      {/* Children */}
+      {isExpanded && hasChildren && (
+        <div>
+          {children.map(child => (
+            <SourceTreeItem 
+              key={child.id}
+              source={child}
+              allSources={allSources}
+              articles={articles}
+              activeSourceId={activeSourceId}
+              depth={depth + 1}
+              onSelect={onSelect}
+              onDelete={onDelete}
+            />
+          ))}
+        </div>
+      )}
+    </div>
+  );
+};
 
 export const Sidebar: React.FC<SidebarProps> = ({
   sources,
@@ -25,10 +114,14 @@ export const Sidebar: React.FC<SidebarProps> = ({
   onOpenGenerateModal,
   onOpenSettings,
   onOpenNote,
+  onDeleteSource,
   isGenerateDisabled
 }) => {
   // Filter notes that should appear in Sidebar (General and Category)
   const sidebarNotes = notes.filter(n => n.type !== 'article');
+  
+  // Root sources are those without a parentId
+  const rootSources = sources.filter(s => !s.parentId);
 
   return (
     <aside className="w-64 bg-slate-900 text-slate-300 flex flex-col border-r border-slate-800 shrink-0">
@@ -43,28 +136,35 @@ export const Sidebar: React.FC<SidebarProps> = ({
 
       <nav className="flex-1 overflow-y-auto py-4 scrollbar-thin scrollbar-thumb-slate-700">
         <div className="px-6 mb-2 text-xs font-semibold uppercase tracking-wider text-slate-500">
-          Sources
+          Library
         </div>
         <button 
           onClick={() => onSetActiveSource(null)}
           className={`w-full text-left px-6 py-2 flex items-center justify-between hover:bg-slate-800 transition-colors ${!activeSourceId ? 'bg-slate-800 text-white' : ''}`}
         >
-          <span>All Articles</span>
+          <div className="flex items-center gap-2">
+            <svg className="w-4 h-4 text-slate-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 11H5m14 0a2 2 0 012 2v6a2 2 0 01-2 2H5a2 2 0 01-2-2v-6a2 2 0 012-2m14 0V9a2 2 0 00-2-2M5 11V9a2 2 0 012-2m0 0V5a2 2 0 012-2h6a2 2 0 012 2v2M7 7h10" />
+            </svg>
+            <span>All Articles</span>
+          </div>
           <span className="text-xs bg-slate-700 px-2 py-0.5 rounded-full">{articles.length}</span>
         </button>
         
-        {sources.map(source => (
-          <button 
-            key={source.id}
-            onClick={() => onSetActiveSource(source.id)}
-            className={`w-full text-left px-6 py-2 flex items-center justify-between hover:bg-slate-800 transition-colors ${activeSourceId === source.id ? 'bg-slate-800 text-white' : ''}`}
-          >
-            <span className="truncate">{source.name}</span>
-            <span className="text-xs bg-slate-700 px-2 py-0.5 rounded-full">
-              {articles.filter(a => a.sourceId === source.id).length}
-            </span>
-          </button>
-        ))}
+        <div className="mt-4">
+             {rootSources.map(source => (
+                <SourceTreeItem 
+                    key={source.id}
+                    source={source}
+                    allSources={sources}
+                    articles={articles}
+                    activeSourceId={activeSourceId}
+                    depth={0}
+                    onSelect={onSetActiveSource}
+                    onDelete={onDeleteSource}
+                />
+             ))}
+        </div>
 
         {sidebarNotes.length > 0 && (
           <>

@@ -24,6 +24,10 @@ const LibrarianApp = () => {
   const [sortConfig, setSortConfig] = useState<{ key: string; direction: 'asc' | 'desc' } | null>(null);
   const [checkedArticleIds, setCheckedArticleIds] = useState<Set<string>>(new Set());
   
+  // Loading State
+  const [isLoading, setIsLoading] = useState(false);
+  const [loadingMessage, setLoadingMessage] = useState('');
+
   // Settings & Theme
   const [isSettingsOpen, setIsSettingsOpen] = useState(false);
   const [theme, setTheme] = useState<ThemeOption>('default');
@@ -70,6 +74,8 @@ const LibrarianApp = () => {
   // Initialize fresh session on mount
   useEffect(() => {
     const initSession = async () => {
+      setIsLoading(true);
+      setLoadingMessage('Initializing library...');
       try {
         await clearDatabase();
         setSources([]);
@@ -77,6 +83,8 @@ const LibrarianApp = () => {
         setNotes([]);
       } catch (err) {
         console.error("Failed to initialize session", err);
+      } finally {
+        setIsLoading(false);
       }
     };
     initSession();
@@ -183,313 +191,450 @@ const LibrarianApp = () => {
     const files = e.target.files;
     if (!files || files.length === 0) return;
 
-    // 1. Identify Source Name
-    const firstFile = files[0] as any;
-    const pathParts = firstFile.webkitRelativePath?.split('/') || [];
-    const sourceName = pathParts.length > 1 ? pathParts[0] : `Source ${sources.length + 1}`;
+    setIsLoading(true);
+    setLoadingMessage('Processing folder structure...');
 
-    // 2. Check for collision and cleanup
-    const existingSource = sources.find(s => s.name === sourceName);
-    if (existingSource) {
-      // Delete source from DB
-      await deleteSourceFromDB(existingSource.id);
-      
-      // Delete articles and files from DB
-      const articlesToDelete = articles.filter(a => a.sourceId === existingSource.id);
-      await Promise.all(articlesToDelete.map(async (article) => {
-        await deleteArticleFromDB(article.id);
-        await deleteFileFromDB(article.id);
-      }));
+    try {
+        const fileList: File[] = Array.from(files);
+        
+        // 1. Map paths to Source IDs
+        // Map Key: "Folder/SubFolder", Value: sourceId
+        const pathSourceIdMap = new Map<string, string>();
+        const newSources: Source[] = [];
+        
+        // Helper to get or create source for a path
+        const getOrCreateSource = (fullPath: string, folderName: string, parentPath: string | null): string => {
+            if (pathSourceIdMap.has(fullPath)) {
+                return pathSourceIdMap.get(fullPath)!;
+            }
 
-      // Update State (Remove old)
-      setSources(prev => prev.filter(s => s.id !== existingSource.id));
-      setArticles(prev => prev.filter(a => a.sourceId !== existingSource.id));
-      
-      // Clear checked articles that were deleted
-      const deletedIds = new Set(articlesToDelete.map(a => a.id));
-      setCheckedArticleIds(prev => {
-          const next = new Set(prev);
-          deletedIds.forEach(id => next.delete(id));
-          return next;
-      });
+            const id = crypto.randomUUID();
+            const parentId = parentPath ? pathSourceIdMap.get(parentPath) : undefined;
+            
+            // Check collision with existing root sources if no parent
+            if (!parentId) {
+                const existing = sources.find(s => s.name === folderName && !s.parentId);
+                if (existing) {
+                    // We treat it as a new import, so we might duplicate or merge. 
+                    // For simplicity in this logic, we create a new ID. 
+                    // If strict merging is needed, we'd use existing.id.
+                    // Let's generate a new ID to avoid complexity with cleaning up old matching trees.
+                }
+            }
 
-      // Reset selection if needed
-      if (activeSourceId === existingSource.id) setActiveSourceId(null);
-      if (selectedArticleId && articlesToDelete.find(a => a.id === selectedArticleId)) setSelectedArticleId(null);
+            const newSource: Source = { id, name: folderName, parentId };
+            newSources.push(newSource);
+            pathSourceIdMap.set(fullPath, id);
+            return id;
+        };
+
+        // 2. Pre-process metadata
+        const pdfMetadataMap = await processMetadataFiles(fileList);
+        const newArticles: Article[] = [];
+
+        // 3. Iterate files to build structure and articles
+        for (const file of fileList) {
+            if (file.type !== 'application/pdf' && !file.name.toLowerCase().endsWith('.pdf')) continue;
+
+            const relativePath = (file as any).webkitRelativePath || file.name;
+            const pathParts = relativePath.split('/');
+            
+            // Handle root file vs nested
+            let sourceId: string;
+            
+            if (pathParts.length > 1) {
+                // It is in a folder
+                // Reconstruct the folder path parts to create sources
+                // e.g. "A/B/file.pdf" -> folders ["A", "B"]
+                const folderParts = pathParts.slice(0, -1);
+                
+                let currentPath = "";
+                let parentPath = null;
+
+                for (let i = 0; i < folderParts.length; i++) {
+                    const folderName = folderParts[i];
+                    const prevPath = currentPath;
+                    currentPath = currentPath ? `${currentPath}/${folderName}` : folderName;
+                    
+                    // Create Source if not exists
+                    getOrCreateSource(currentPath, folderName, prevPath || null);
+                }
+                sourceId = pathSourceIdMap.get(currentPath)!;
+            } else {
+                // Root level file, assign to a generic "Root Upload" source or similar?
+                // For "Add Folder", usually the first part is the folder name.
+                // If user dragged a file directly, webkitRelativePath might be empty or just filename.
+                const rootSourceName = "Imported Files";
+                let rootSource = newSources.find(s => s.name === rootSourceName);
+                if (!rootSource) {
+                     // Check existing state sources too
+                     const existingRoot = sources.find(s => s.name === rootSourceName);
+                     if(existingRoot) {
+                         sourceId = existingRoot.id;
+                     } else {
+                         sourceId = crypto.randomUUID();
+                         newSources.push({ id: sourceId, name: rootSourceName });
+                     }
+                } else {
+                    sourceId = rootSource.id;
+                }
+            }
+
+            const meta = pdfMetadataMap.get(file.name);
+            const articleMetadata = createMetadata(file, meta);
+            const articleId = crypto.randomUUID();
+            
+            const article: Article = {
+                id: articleId,
+                sourceId,
+                fileName: file.name,
+                fileSize: file.size,
+                addedAt: Date.now(),
+                status: 'completed',
+                metadata: articleMetadata
+            };
+
+            newArticles.push(article);
+            // Save individually to avoid memory spikes, though we block UI
+            await saveFileToDB(articleId, file);
+            await saveArticleToDB(article);
+        }
+
+        // Save all new sources
+        for (const s of newSources) {
+            await saveSourceToDB(s);
+        }
+
+        setSources(prev => [...prev, ...newSources]);
+        setArticles(prev => [...prev, ...newArticles]);
+
+    } catch (err) {
+        console.error("Import failed", err);
+        alert("Failed to import folder structure.");
+    } finally {
+        setIsLoading(false);
+        if (e.target) e.target.value = "";
     }
-
-    const sourceId = crypto.randomUUID();
-    const newSource: Source = { id: sourceId, name: sourceName };
-
-    setSources(prev => [...prev, newSource]);
-    await saveSourceToDB(newSource);
-
-    const fileList: File[] = Array.from(files);
-    const pdfMetadataMap = await processMetadataFiles(fileList);
-    const newArticles: Article[] = [];
-    
-    for (const file of fileList) {
-      if (file.type !== 'application/pdf' && !file.name.toLowerCase().endsWith('.pdf')) continue;
-
-      const meta = pdfMetadataMap.get(file.name);
-      const articleMetadata = createMetadata(file, meta);
-
-      const articleId = crypto.randomUUID();
-      const article: Article = {
-        id: articleId,
-        sourceId,
-        fileName: file.name,
-        fileSize: file.size,
-        addedAt: Date.now(),
-        status: 'completed',
-        metadata: articleMetadata
-      };
-      
-      newArticles.push(article);
-      await saveFileToDB(articleId, file);
-      await saveArticleToDB(article);
-    }
-
-    setArticles(prev => [...prev, ...newArticles]);
-    if (e.target) e.target.value = ""; // Reset input
   };
 
   const handleAddPDF = async (e: React.ChangeEvent<HTMLInputElement>) => {
       const files = e.target.files;
       if (!files || files.length === 0) return;
 
-      // Find or create "Uploaded Files" source
-      let uploadSource = sources.find(s => s.name === "Uploaded Files");
-      let sourceId = uploadSource?.id;
+      setIsLoading(true);
+      setLoadingMessage('Importing PDF files...');
 
-      if (!uploadSource) {
-          sourceId = crypto.randomUUID();
-          uploadSource = { id: sourceId, name: "Uploaded Files" };
-          setSources(prev => [...prev, uploadSource!]);
-          await saveSourceToDB(uploadSource);
-      } else {
-          sourceId = uploadSource.id;
+      try {
+        // Find or create "Uploaded Files" source
+        let uploadSource = sources.find(s => s.name === "Uploaded Files");
+        let sourceId = uploadSource?.id;
+
+        if (!uploadSource) {
+            sourceId = crypto.randomUUID();
+            uploadSource = { id: sourceId, name: "Uploaded Files" };
+            setSources(prev => [...prev, uploadSource!]);
+            await saveSourceToDB(uploadSource);
+        } else {
+            sourceId = uploadSource.id;
+        }
+
+        const fileList: File[] = Array.from(files);
+        const pdfMetadataMap = await processMetadataFiles(fileList);
+        const newArticles: Article[] = [];
+
+        for (const file of fileList) {
+            if (file.type !== 'application/pdf' && !file.name.toLowerCase().endsWith('.pdf')) continue;
+
+            const meta = pdfMetadataMap.get(file.name);
+            const articleMetadata = createMetadata(file, meta);
+
+            const articleId = crypto.randomUUID();
+            const article: Article = {
+                id: articleId,
+                sourceId: sourceId!,
+                fileName: file.name,
+                fileSize: file.size,
+                addedAt: Date.now(),
+                status: 'completed',
+                metadata: articleMetadata
+            };
+
+            newArticles.push(article);
+            await saveFileToDB(articleId, file);
+            await saveArticleToDB(article);
+        }
+
+        setArticles(prev => [...prev, ...newArticles]);
+      } catch(err) {
+          console.error(err);
+          alert("Error importing files.");
+      } finally {
+        setIsLoading(false);
+        if (e.target) e.target.value = "";
       }
-
-      const fileList: File[] = Array.from(files);
-      const pdfMetadataMap = await processMetadataFiles(fileList);
-      const newArticles: Article[] = [];
-
-      for (const file of fileList) {
-          if (file.type !== 'application/pdf' && !file.name.toLowerCase().endsWith('.pdf')) continue;
-
-          const meta = pdfMetadataMap.get(file.name);
-          const articleMetadata = createMetadata(file, meta);
-
-          const articleId = crypto.randomUUID();
-          const article: Article = {
-              id: articleId,
-              sourceId: sourceId!,
-              fileName: file.name,
-              fileSize: file.size,
-              addedAt: Date.now(),
-              status: 'completed',
-              metadata: articleMetadata
-          };
-
-          newArticles.push(article);
-          await saveFileToDB(articleId, file);
-          await saveArticleToDB(article);
-      }
-
-      setArticles(prev => [...prev, ...newArticles]);
-      if (e.target) e.target.value = "";
   };
 
-  const handleGenerateConfirm = (options: { 
+  const handleDeleteSource = async (sourceIdToDelete: string) => {
+      if(!window.confirm("Are you sure? This will delete this folder, all sub-folders, and all articles within them.")) return;
+
+      setIsLoading(true);
+      setLoadingMessage('Deleting source and contents...');
+
+      try {
+          // 1. Identify all descendant source IDs (Recursive)
+          const allSourceIds = new Set<string>();
+          const gatherIds = (id: string) => {
+              allSourceIds.add(id);
+              const children = sources.filter(s => s.parentId === id);
+              children.forEach(c => gatherIds(c.id));
+          };
+          gatherIds(sourceIdToDelete);
+
+          // 2. Identify articles to delete
+          const articlesToDelete = articles.filter(a => allSourceIds.has(a.sourceId));
+          const articleIdsToDelete = new Set(articlesToDelete.map(a => a.id));
+
+          // 3. Identify notes to delete (linked to these articles)
+          const notesToDelete = notes.filter(n => n.type === 'article' && n.targetId && articleIdsToDelete.has(n.targetId));
+
+          // 4. Perform DB Deletions
+          // Sources
+          await Promise.all(Array.from(allSourceIds).map(id => deleteSourceFromDB(id)));
+          
+          // Articles & Files
+          await Promise.all(Array.from(articleIdsToDelete).map(async (id) => {
+              await deleteArticleFromDB(id);
+              await deleteFileFromDB(id);
+          }));
+
+          // Notes
+          await Promise.all(notesToDelete.map(n => deleteNoteFromDB(n.id)));
+
+          // 5. Update State
+          setSources(prev => prev.filter(s => !allSourceIds.has(s.id)));
+          setArticles(prev => prev.filter(a => !articleIdsToDelete.has(a.id)));
+          setNotes(prev => prev.filter(n => !notesToDelete.includes(n)));
+          
+          setCheckedArticleIds(prev => {
+            const next = new Set(prev);
+            articleIdsToDelete.forEach(id => next.delete(id));
+            return next;
+          });
+
+          if (activeSourceId && allSourceIds.has(activeSourceId)) {
+              setActiveSourceId(null);
+          }
+          if (selectedArticleId && articleIdsToDelete.has(selectedArticleId)) {
+              setSelectedArticleId(null);
+          }
+
+      } catch (err) {
+          console.error("Delete source failed", err);
+          alert("Failed to delete source.");
+      } finally {
+          setIsLoading(false);
+      }
+  };
+
+  const handleGenerateConfirm = async (options: { 
       references: boolean; 
       notes: boolean; 
       notesOptions: { general: boolean; category: boolean; article: boolean };
       format?: string 
   }) => {
     
-    const selectedArticles = articles.filter(a => checkedArticleIds.has(a.id));
+    setIsLoading(true);
+    setLoadingMessage('Generating output...');
 
-    // 1. Generate References
-    if (options.references) {
-        const bibtexContent = selectedArticles
-            .map(a => a.metadata?.bibtex || "")
-            .filter(b => b.trim().length > 0)
-            .join('\n\n');
-        
-        if (bibtexContent) {
-            const blob = new Blob([bibtexContent], { type: 'text/plain' });
-            const url = URL.createObjectURL(blob);
-            const a = document.createElement('a');
-            a.href = url;
-            a.download = 'references_1.bib';
-            a.click();
-            URL.revokeObjectURL(url);
-        } else {
-            alert("No BibTeX data found for selected articles.");
-        }
-    }
+    // Small delay to allow UI to render loading state
+    await new Promise(r => setTimeout(r, 100));
 
-    // 2. Generate Notes
-    if (options.notes) {
-        let content = '';
-        const generalNotes = options.notesOptions.general ? notes.filter(n => n.type === 'general') : [];
-        const categoryNotes = options.notesOptions.category ? notes.filter(n => n.type === 'category') : [];
-        const articleNotes = options.notesOptions.article ? notes.filter(n => n.type === 'article' && n.targetId && checkedArticleIds.has(n.targetId)) : [];
-        
-        // --- TXT or DAT Format ---
-        if (options.format === '.txt' || options.format === '.dat') {
-            if (generalNotes.length > 0) {
-                content += "# General Notes\n\n";
-                generalNotes.forEach(n => {
-                    content += `## ${n.title}\n${n.content}\n\n`;
-                });
-            }
-            if (categoryNotes.length > 0) {
-                content += "# Category Notes\n\n";
-                // Group by category
-                const catGroups: Record<string, Note[]> = {};
-                categoryNotes.forEach(n => {
-                    if (n.targetId) {
-                        if (!catGroups[n.targetId]) catGroups[n.targetId] = [];
-                        catGroups[n.targetId].push(n);
-                    }
-                });
-                Object.entries(catGroups).forEach(([cat, ns]) => {
-                    content += `### ${cat}\n`;
-                    ns.forEach(n => content += `#### ${n.title}\n${n.content}\n\n`);
-                });
-            }
-            if (articleNotes.length > 0) {
-                content += "# Article-specific Notes\n\n";
-                articleNotes.forEach(n => {
-                    const art = articles.find(a => a.id === n.targetId);
-                    const artTitle = art?.metadata?.title || art?.fileName || "Unknown Article";
-                    content += `## ${n.title}\nThis subsection belongs to ${artTitle}.\n\n${n.content}\n\n`;
-                });
-            }
-        } 
-        // --- TeX Format ---
-        else if (options.format === '.tex') {
-            const formatTexContent = (text: string) => {
-                // 1. Preserve explicit escapes \_ and \^
-                let out = text.replace(/\\_/g, '@@ESC-US@@')
-                              .replace(/\\\^/g, '@@ESC-CARET@@');
-                
-                // 2. Escape other special chars
-                out = out.replace(/[\\#$|%&{}~]/g, (match) => {
-                    switch (match) {
-                        case '\\': return '\\textbackslash{}';
-                        case '#': return '\\#';
-                        case '$': return '\\$';
-                        case '%': return '\\%';
-                        case '&': return '\\&';
-                        case '{': return '\\{';
-                        case '}': return '\\}';
-                        case '~': return '\\textasciitilde{}';
-                        case '|': return '\\textbar{}';
-                        default: return match;
-                    }
-                });
+    try {
+        const selectedArticles = articles.filter(a => checkedArticleIds.has(a.id));
 
-                // 3. Wrap math-like words (containing _ or ^) in $...$
-                out = out.replace(/(\S*[_\^]\S*)/g, (match) => {
-                     return `$${match}$`;
-                });
-                
-                // 4. Restore explicit escapes
-                out = out.replace(/@@ESC-US@@/g, '\\_')
-                         .replace(/@@ESC-CARET@@/g, '\\^');
-                         
-                return out;
-            };
-
-            content += `\\documentclass{article}\n\\usepackage{amsmath}\n\\title{Notes of Librarian}\n\\begin{document}\n\\maketitle\n\n`;
+        // 1. Generate References
+        if (options.references) {
+            const bibtexContent = selectedArticles
+                .map(a => a.metadata?.bibtex || "")
+                .filter(b => b.trim().length > 0)
+                .join('\n\n');
             
-            if (generalNotes.length > 0) {
-                content += `\\section{General Notes}\n`;
-                generalNotes.forEach(n => {
-                    content += `\\subsection{${n.title}}\n${formatTexContent(n.content)}\n\n`;
-                });
+            if (bibtexContent) {
+                const blob = new Blob([bibtexContent], { type: 'text/plain' });
+                const url = URL.createObjectURL(blob);
+                const a = document.createElement('a');
+                a.href = url;
+                a.download = 'references_1.bib';
+                a.click();
+                URL.revokeObjectURL(url);
+            } else {
+                // alert("No BibTeX data found for selected articles.");
             }
+        }
 
-            if (categoryNotes.length > 0) {
-                content += `\\section{Category Notes}\n`;
-                const catGroups: Record<string, Note[]> = {};
-                categoryNotes.forEach(n => {
-                    if (n.targetId) {
-                        if (!catGroups[n.targetId]) catGroups[n.targetId] = [];
-                        catGroups[n.targetId].push(n);
-                    }
-                });
-                Object.entries(catGroups).forEach(([cat, ns]) => {
-                    content += `\\subsection{${cat}}\n`;
-                    ns.forEach(n => content += `\\subsubsection{${n.title}}\n${formatTexContent(n.content)}\n\n`);
-                });
-            }
-
-            const referencedArticleIds = new Set<string>();
-
-            if (articleNotes.length > 0) {
-                content += `\\section{Article-specific Notes}\n`;
-                articleNotes.forEach(n => {
-                    if (n.targetId) referencedArticleIds.add(n.targetId);
-                    const art = articles.find(a => a.id === n.targetId);
-                    const artTitle = art?.metadata?.title || art?.fileName || "Unknown Article";
-                    content += `\\subsection{${n.title}}\nThis subsection belongs to \\textit{${artTitle}}.\n\n${formatTexContent(n.content)}\n\n`;
-                });
-            }
-
-            // Append \nocite for each article referenced in notes
-            if (referencedArticleIds.size > 0) {
-                const referencedArticles = articles.filter(a => referencedArticleIds.has(a.id));
-                const noteBibtexEntries: string[] = [];
-                const noteCitationKeys: Set<string> = new Set();
-
-                referencedArticles.forEach(a => {
-                    const bib = a.metadata?.bibtex;
-                    if (bib) {
-                        noteBibtexEntries.push(bib);
-                        const match = bib.match(/@\w+\s*\{\s*([^,]+),/);
-                        if (match && match[1]) {
-                            noteCitationKeys.add(match[1].trim());
-                        }
-                    }
-                });
-
-                if (noteCitationKeys.size > 0) {
-                    noteCitationKeys.forEach(key => {
-                        content += `\\nocite{${key}}\n`;
+        // 2. Generate Notes
+        if (options.notes) {
+            let content = '';
+            const generalNotes = options.notesOptions.general ? notes.filter(n => n.type === 'general') : [];
+            const categoryNotes = options.notesOptions.category ? notes.filter(n => n.type === 'category') : [];
+            const articleNotes = options.notesOptions.article ? notes.filter(n => n.type === 'article' && n.targetId && checkedArticleIds.has(n.targetId)) : [];
+            
+            // --- TXT or DAT Format ---
+            if (options.format === '.txt' || options.format === '.dat') {
+                if (generalNotes.length > 0) {
+                    content += "# General Notes\n\n";
+                    generalNotes.forEach(n => {
+                        content += `## ${n.title}\n${n.content}\n\n`;
                     });
-                    content += `\n\\clearpage\n\\bibliographystyle{plain}\n\\bibliography{references_for_notes_1}\n`;
+                }
+                if (categoryNotes.length > 0) {
+                    content += "# Category Notes\n\n";
+                    // Group by category
+                    const catGroups: Record<string, Note[]> = {};
+                    categoryNotes.forEach(n => {
+                        if (n.targetId) {
+                            if (!catGroups[n.targetId]) catGroups[n.targetId] = [];
+                            catGroups[n.targetId].push(n);
+                        }
+                    });
+                    Object.entries(catGroups).forEach(([cat, ns]) => {
+                        content += `### ${cat}\n`;
+                        ns.forEach(n => content += `#### ${n.title}\n${n.content}\n\n`);
+                    });
+                }
+                if (articleNotes.length > 0) {
+                    content += "# Article-specific Notes\n\n";
+                    articleNotes.forEach(n => {
+                        const art = articles.find(a => a.id === n.targetId);
+                        const artTitle = art?.metadata?.title || art?.fileName || "Unknown Article";
+                        content += `## ${n.title}\nThis subsection belongs to ${artTitle}.\n\n${n.content}\n\n`;
+                    });
+                }
+            } 
+            // --- TeX Format ---
+            else if (options.format === '.tex') {
+                const formatTexContent = (text: string) => {
+                    // 1. Preserve explicit escapes \_ and \^
+                    let out = text.replace(/\\_/g, '@@ESC-US@@')
+                                  .replace(/\\\^/g, '@@ESC-CARET@@');
+                    
+                    // 2. Escape other special chars
+                    out = out.replace(/[\\#$|%&{}~]/g, (match) => {
+                        switch (match) {
+                            case '\\': return '\\textbackslash{}';
+                            case '#': return '\\#';
+                            case '$': return '\\$';
+                            case '%': return '\\%';
+                            case '&': return '\\&';
+                            case '{': return '\\{';
+                            case '}': return '\\}';
+                            case '~': return '\\textasciitilde{}';
+                            case '|': return '\\textbar{}';
+                            default: return match;
+                        }
+                    });
+
+                    // 3. Wrap math-like words (containing _ or ^) in $...$
+                    out = out.replace(/(\S*[_\^]\S*)/g, (match) => {
+                         return `$${match}$`;
+                    });
+                    
+                    // 4. Restore explicit escapes
+                    out = out.replace(/@@ESC-US@@/g, '\\_')
+                             .replace(/@@ESC-CARET@@/g, '\\^');
+                             
+                    return out;
+                };
+
+                content += `\\documentclass{article}\n\\usepackage{amsmath}\n\\title{Notes of Librarian}\n\\begin{document}\n\\maketitle\n\n`;
+                
+                if (generalNotes.length > 0) {
+                    content += `\\section{General Notes}\n`;
+                    generalNotes.forEach(n => {
+                        content += `\\subsection{${n.title}}\n${formatTexContent(n.content)}\n\n`;
+                    });
                 }
 
-                if (noteBibtexEntries.length > 0) {
-                    const bibBlob = new Blob([noteBibtexEntries.join('\n\n')], { type: 'text/plain' });
-                    const bibUrl = URL.createObjectURL(bibBlob);
-                    const bibLink = document.createElement('a');
-                    bibLink.href = bibUrl;
-                    bibLink.download = 'references_for_notes_1.bib';
-                    bibLink.click();
-                    URL.revokeObjectURL(bibUrl);
+                if (categoryNotes.length > 0) {
+                    content += `\\section{Category Notes}\n`;
+                    const catGroups: Record<string, Note[]> = {};
+                    categoryNotes.forEach(n => {
+                        if (n.targetId) {
+                            if (!catGroups[n.targetId]) catGroups[n.targetId] = [];
+                            catGroups[n.targetId].push(n);
+                        }
+                    });
+                    Object.entries(catGroups).forEach(([cat, ns]) => {
+                        content += `\\subsection{${cat}}\n`;
+                        ns.forEach(n => content += `\\subsubsection{${n.title}}\n${formatTexContent(n.content)}\n\n`);
+                    });
                 }
+
+                const referencedArticleIds = new Set<string>();
+
+                if (articleNotes.length > 0) {
+                    content += `\\section{Article-specific Notes}\n`;
+                    articleNotes.forEach(n => {
+                        if (n.targetId) referencedArticleIds.add(n.targetId);
+                        const art = articles.find(a => a.id === n.targetId);
+                        const artTitle = art?.metadata?.title || art?.fileName || "Unknown Article";
+                        content += `\\subsection{${n.title}}\nThis subsection belongs to \\textit{${artTitle}}.\n\n${formatTexContent(n.content)}\n\n`;
+                    });
+                }
+
+                // Append \nocite for each article referenced in notes
+                if (referencedArticleIds.size > 0) {
+                    const referencedArticles = articles.filter(a => referencedArticleIds.has(a.id));
+                    const noteBibtexEntries: string[] = [];
+                    const noteCitationKeys: Set<string> = new Set();
+
+                    referencedArticles.forEach(a => {
+                        const bib = a.metadata?.bibtex;
+                        if (bib) {
+                            noteBibtexEntries.push(bib);
+                            const match = bib.match(/@\w+\s*\{\s*([^,]+),/);
+                            if (match && match[1]) {
+                                noteCitationKeys.add(match[1].trim());
+                            }
+                        }
+                    });
+
+                    if (noteCitationKeys.size > 0) {
+                        noteCitationKeys.forEach(key => {
+                            content += `\\nocite{${key}}\n`;
+                        });
+                        content += `\n\\clearpage\n\\bibliographystyle{plain}\n\\bibliography{references_for_notes_1}\n`;
+                    }
+
+                    if (noteBibtexEntries.length > 0) {
+                        const bibBlob = new Blob([noteBibtexEntries.join('\n\n')], { type: 'text/plain' });
+                        const bibUrl = URL.createObjectURL(bibBlob);
+                        const bibLink = document.createElement('a');
+                        bibLink.href = bibUrl;
+                        bibLink.download = 'references_for_notes_1.bib';
+                        bibLink.click();
+                        URL.revokeObjectURL(bibUrl);
+                    }
+                }
+
+                content += `\\end{document}`;
             }
 
-            content += `\\end{document}`;
+            if (content) {
+                const blob = new Blob([content], { type: 'text/plain' });
+                const url = URL.createObjectURL(blob);
+                const a = document.createElement('a');
+                a.href = url;
+                a.download = `notes${options.format}`;
+                a.click();
+                URL.revokeObjectURL(url);
+            }
         }
-
-        if (content) {
-            const blob = new Blob([content], { type: 'text/plain' });
-            const url = URL.createObjectURL(blob);
-            const a = document.createElement('a');
-            a.href = url;
-            a.download = `notes${options.format}`;
-            a.click();
-            URL.revokeObjectURL(url);
-        } else {
-            // Only alert if notes were selected but none found
-            // alert("No relevant notes found to generate.");
-        }
+    } catch(e) {
+        console.error(e);
+        alert("Failed to generate output");
+    } finally {
+        setIsLoading(false);
     }
   };
 
@@ -590,6 +735,8 @@ const LibrarianApp = () => {
   };
 
   const handleSaveSession = async () => {
+    setIsLoading(true);
+    setLoadingMessage('Saving session...');
     try {
       const { sources, articles, notes } = await getAllData();
       const session = {
@@ -608,6 +755,8 @@ const LibrarianApp = () => {
     } catch (err) {
       console.error("Save session failed", err);
       alert("Failed to save session.");
+    } finally {
+      setIsLoading(false);
     }
   };
 
@@ -615,6 +764,8 @@ const LibrarianApp = () => {
     if (checkedArticleIds.size === 0) return;
 
     if (window.confirm(`Are you sure you want to delete ${checkedArticleIds.size} selected articles?`)) {
+      setIsLoading(true);
+      setLoadingMessage('Deleting selected articles...');
       try {
         const idsToDelete = Array.from(checkedArticleIds);
         
@@ -640,6 +791,8 @@ const LibrarianApp = () => {
       } catch (err) {
         console.error("Delete articles failed", err);
         alert("Failed to delete articles.");
+      } finally {
+        setIsLoading(false);
       }
     }
   };
@@ -654,6 +807,8 @@ const LibrarianApp = () => {
 
       if (!window.confirm("Importing a session will replace all current data. Continue?")) return;
       
+      setIsLoading(true);
+      setLoadingMessage('Importing session data...');
       try {
         const text = await file.text();
         const session = JSON.parse(text);
@@ -680,6 +835,8 @@ const LibrarianApp = () => {
       } catch (err) {
         console.error("Import session failed", err);
         alert("Failed to import session. The file might be corrupted.");
+      } finally {
+        setIsLoading(false);
       }
     };
     input.click();
@@ -695,9 +852,23 @@ const LibrarianApp = () => {
   };
 
   const filteredArticles = useMemo(() => {
-    let list = activeSourceId 
-      ? articles.filter(a => a.sourceId === activeSourceId)
-      : articles;
+    let list = articles;
+
+    // Filter by Source (including nested sources)
+    if (activeSourceId) {
+        // Find all descendant source IDs
+        const descendants = new Set<string>([activeSourceId]);
+        const addDescendants = (parentId: string) => {
+            const children = sources.filter(s => s.parentId === parentId);
+            children.forEach(c => {
+                descendants.add(c.id);
+                addDescendants(c.id);
+            });
+        };
+        addDescendants(activeSourceId);
+        
+        list = list.filter(a => descendants.has(a.sourceId));
+    }
 
     if (searchQuery.trim()) {
       const q = searchQuery.toLowerCase();
@@ -746,7 +917,7 @@ const LibrarianApp = () => {
     }
 
     return [...list]; // Return new array reference
-  }, [articles, activeSourceId, searchQuery, sortConfig]);
+  }, [articles, activeSourceId, searchQuery, sortConfig, sources]);
 
   const handleToggleArticle = (id: string) => {
       setCheckedArticleIds(prev => {
@@ -771,6 +942,15 @@ const LibrarianApp = () => {
 
   return (
     <div className="flex h-screen w-screen bg-slate-50 dark:bg-slate-950 font-sans text-slate-900 dark:text-slate-100 overflow-hidden transition-colors duration-200">
+      
+      {/* Loading Overlay */}
+      {isLoading && (
+        <div className="fixed inset-0 z-[100] bg-white/80 dark:bg-slate-950/80 backdrop-blur-sm flex flex-col items-center justify-center">
+            <div className="w-12 h-12 border-4 border-indigo-200 border-t-indigo-600 rounded-full animate-spin mb-4"></div>
+            <p className="text-lg font-semibold text-slate-700 dark:text-slate-300 animate-pulse">{loadingMessage}</p>
+        </div>
+      )}
+
       <Sidebar 
         sources={sources}
         articles={articles}
@@ -781,6 +961,7 @@ const LibrarianApp = () => {
         onOpenGenerateModal={() => setIsGenerateModalOpen(true)}
         onOpenSettings={() => setIsSettingsOpen(true)}
         onOpenNote={(note) => setSelectedNote(note)}
+        onDeleteSource={handleDeleteSource}
         isGenerateDisabled={checkedArticleIds.size === 0}
       />
 
