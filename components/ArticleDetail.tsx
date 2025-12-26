@@ -139,13 +139,6 @@ export const ArticleDetail: React.FC<ArticleDetailProps> = ({ article, onClose, 
                     onKeyDown={handleAddKeyword}
                 />
               </section>
-
-              <section className="bg-slate-50 dark:bg-slate-800/50 p-6 rounded-xl border border-slate-100 dark:border-slate-800">
-                <h4 className="text-xs font-bold text-slate-400 dark:text-slate-500 uppercase tracking-widest mb-4">Abstract / Summary</h4>
-                <p className="text-slate-700 dark:text-slate-300 leading-relaxed font-serif text-lg">
-                  {article.metadata?.abstract || <span className="italic text-slate-400 dark:text-slate-500">No abstract available.</span>}
-                </p>
-              </section>
               
               <div className="pt-8 border-t border-slate-100 dark:border-slate-800">
                 <button 
