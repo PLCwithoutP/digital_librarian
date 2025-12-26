@@ -1,4 +1,3 @@
-
 import React, { useState, useEffect, useMemo, Suspense } from 'react';
 import { createRoot } from 'react-dom/client';
 import { Article, Source, ArticleMetadata, Note, NoteType } from './types';
@@ -374,6 +373,25 @@ const LibrarianApp = () => {
       }
   };
 
+  const handleReplacePdf = async (articleId: string, file: File) => {
+      setIsLoading(true);
+      setLoadingMessage('Replacing PDF file...');
+      try {
+        await saveFileToDB(articleId, file);
+        const article = articles.find(a => a.id === articleId);
+        if (article) {
+            const updated = { ...article, fileSize: file.size };
+            await saveArticleToDB(updated);
+            setArticles(prev => prev.map(a => a.id === articleId ? updated : a));
+        }
+      } catch(err) {
+        console.error(err);
+        alert("Failed to replace PDF.");
+      } finally {
+        setIsLoading(false);
+      }
+  };
+
   const handleDeleteSource = async (sourceIdToDelete: string) => {
       if(!window.confirm("Are you sure? This will delete this folder, all sub-folders, and all articles within them.")) return;
 
@@ -399,10 +417,10 @@ const LibrarianApp = () => {
 
           // 4. Perform DB Deletions
           // Sources
-          await Promise.all(Array.from(allSourceIds).map(id => deleteSourceFromDB(id)));
+          await Promise.all(Array.from(allSourceIds).map((id: string) => deleteSourceFromDB(id)));
           
           // Articles & Files
-          await Promise.all(Array.from(articleIdsToDelete).map(async (id) => {
+          await Promise.all(Array.from(articleIdsToDelete).map(async (id: string) => {
               await deleteArticleFromDB(id);
               await deleteFileFromDB(id);
           }));
@@ -467,8 +485,6 @@ const LibrarianApp = () => {
                 a.download = 'references_1.bib';
                 a.click();
                 URL.revokeObjectURL(url);
-            } else {
-                // alert("No BibTeX data found for selected articles.");
             }
         }
 
@@ -479,8 +495,8 @@ const LibrarianApp = () => {
             const categoryNotes = options.notesOptions.category ? notes.filter(n => n.type === 'category') : [];
             const articleNotes = options.notesOptions.article ? notes.filter(n => n.type === 'article' && n.targetId && checkedArticleIds.has(n.targetId)) : [];
             
-            // --- TXT or DAT Format ---
-            if (options.format === '.txt' || options.format === '.dat') {
+            // --- Markdown Format ---
+            if (options.format === '.md') {
                 if (generalNotes.length > 0) {
                     content += "# General Notes\n\n";
                     generalNotes.forEach(n => {
@@ -656,11 +672,21 @@ const LibrarianApp = () => {
 
   const handleSetupNote = (type: NoteType, targetId?: string) => {
     setIsEditingNote(false);
+    let defaultTitle = `Note ${Date.now().toString().slice(-4)}`;
+    
+    // Improved title generation for articles
+    if (type === 'article' && targetId) {
+        const art = articles.find(a => a.id === targetId);
+        if (art) {
+            defaultTitle = `Notes on ${art.metadata?.title || art.fileName}`;
+        }
+    }
+
     setActiveEditorNote({
         type,
         targetId,
         content: '',
-        title: `Note ${Date.now().toString().slice(-4)}`
+        title: defaultTitle
     });
   };
 
@@ -770,7 +796,7 @@ const LibrarianApp = () => {
         const idsToDelete = Array.from(checkedArticleIds);
         
         // 1. Delete Articles and Files from DB
-        await Promise.all(idsToDelete.map(async (id) => {
+        await Promise.all(idsToDelete.map(async (id: string) => {
             await deleteArticleFromDB(id);
             await deleteFileFromDB(id);
         }));
@@ -857,7 +883,7 @@ const LibrarianApp = () => {
     // Filter by Source (including nested sources)
     if (activeSourceId) {
         // Find all descendant source IDs
-        const descendants = new Set<string>([activeSourceId]);
+        const descendants = new Set<string>([activeSourceId as string]);
         const addDescendants = (parentId: string) => {
             const children = sources.filter(s => s.parentId === parentId);
             children.forEach(c => {
@@ -932,6 +958,15 @@ const LibrarianApp = () => {
       setCheckedArticleIds(new Set(ids));
   };
 
+  const handleNotebookButtonClick = () => {
+    if (checkedArticleIds.size === 1) {
+        const articleId = Array.from(checkedArticleIds)[0];
+        handleSetupNote('article', articleId);
+    } else {
+        setIsNotebookSetupOpen(true);
+    }
+  };
+
   const allCategories = useMemo(() => {
       const cats = new Set<string>();
       articles.forEach(a => a.metadata?.categories.forEach(c => cats.add(c)));
@@ -991,11 +1026,12 @@ const LibrarianApp = () => {
         onEditNote={handleEditNote}
         onOpenNote={(note) => setSelectedNote(note)}
         onDeleteNote={handleDeleteNote}
+        onReplacePdf={handleReplacePdf}
       />
 
       {/* Floating Action Button for Notebook */}
       <button 
-        onClick={() => setIsNotebookSetupOpen(true)}
+        onClick={handleNotebookButtonClick}
         className="fixed bottom-6 right-6 z-[40] p-4 bg-indigo-600 hover:bg-indigo-700 text-white rounded-full shadow-lg transition-transform hover:scale-110 active:scale-95 flex items-center justify-center group"
         title="Open Notebook"
       >

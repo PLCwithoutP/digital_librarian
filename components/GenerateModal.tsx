@@ -1,4 +1,3 @@
-
 import React, { useState, useEffect } from 'react';
 
 interface GenerateModalProps {
@@ -23,7 +22,7 @@ export const GenerateModal: React.FC<GenerateModalProps> = ({
 }) => {
   const [includeReferences, setIncludeReferences] = useState(false);
   const [includeNotes, setIncludeNotes] = useState(false);
-  const [notesFormat, setNotesFormat] = useState('.txt');
+  const [notesFormat, setNotesFormat] = useState('.md');
   
   const [includeGeneralNotes, setIncludeGeneralNotes] = useState(true);
   const [includeCategoryNotes, setIncludeCategoryNotes] = useState(true);
@@ -34,7 +33,7 @@ export const GenerateModal: React.FC<GenerateModalProps> = ({
     if (isOpen) {
       setIncludeReferences(false);
       setIncludeNotes(false);
-      setNotesFormat('.txt');
+      setNotesFormat('.md');
       setIncludeGeneralNotes(true);
       setIncludeCategoryNotes(true);
     }
@@ -146,8 +145,7 @@ export const GenerateModal: React.FC<GenerateModalProps> = ({
                         value={notesFormat}
                         onChange={(e) => setNotesFormat(e.target.value)}
                     >
-                        <option value=".txt">.txt (Plain Text)</option>
-                        <option value=".dat">.dat (Data File)</option>
+                        <option value=".md">.md (Markdown)</option>
                         <option value=".tex">.tex (LaTeX)</option>
                     </select>
                 </div>
