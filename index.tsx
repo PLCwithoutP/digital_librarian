@@ -15,18 +15,19 @@ const LibrarianApp = () => {
   const [isGrouped, setIsGrouped] = useState(false);
   const [sortConfig, setSortConfig] = useState<{ key: string; direction: 'asc' | 'desc' } | null>(null);
 
-  // Load data on mount
+  // Initialize fresh session on mount
   useEffect(() => {
-    const loadData = async () => {
+    const initSession = async () => {
       try {
-        const { sources, articles } = await getAllData();
-        setSources(sources);
-        setArticles(articles);
+        // Clear persistent storage on startup to ensure a fresh session
+        await clearDatabase();
+        setSources([]);
+        setArticles([]);
       } catch (err) {
-        console.error("Failed to load data from IndexedDB", err);
+        console.error("Failed to initialize session", err);
       }
     };
-    loadData();
+    initSession();
   }, []);
 
   const handleAddSource = async (e: React.ChangeEvent<HTMLInputElement>) => {
