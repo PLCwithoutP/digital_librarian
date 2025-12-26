@@ -133,12 +133,18 @@ def parse_pdf(file_bytes_list, file_name):
 const installWithRetry = async (micropip: any, pkg: string, retries = 3) => {
   for (let i = 0; i < retries; i++) {
     try {
+      console.log(`Installing ${pkg} (Attempt ${i + 1}/${retries})...`);
       await micropip.install(pkg);
+      console.log(`${pkg} installed successfully.`);
       return;
     } catch (err) {
-      console.warn(`Attempt ${i + 1} failed to install ${pkg}:`, err);
-      if (i === retries - 1) throw err;
-      await new Promise(r => setTimeout(r, 1000));
+      console.warn(`Attempt ${i + 1} failed to install ${pkg}.`, err);
+      if (i === retries - 1) {
+        console.error(`Failed to install ${pkg} after ${retries} attempts.`);
+        throw err;
+      }
+      // Linear backoff: 1s, 2s, 3s...
+      await new Promise(r => setTimeout(r, (i + 1) * 1000));
     }
   }
 };
@@ -148,22 +154,22 @@ export const initPyodide = async () => {
 
   pyodideReadyPromise = (async () => {
     if (!window.loadPyodide) {
-      throw new Error("Pyodide script not loaded");
+      throw new Error("Pyodide script not loaded. Check internet connection.");
     }
     
     console.log("Loading Pyodide...");
     pyodide = await window.loadPyodide();
     
     // Load SSL which is sometimes needed for network operations
+    console.log("Loading SSL...");
     await pyodide.loadPackage("ssl");
 
     console.log("Loading Micropip...");
     await pyodide.loadPackage("micropip");
     const micropip = pyodide.pyimport("micropip");
     
-    console.log("Installing pypdf...");
-    // Pin version to ensure stability and compatibility
-    await installWithRetry(micropip, "pypdf==3.17.1");
+    // Unpin version to allow latest compatible wheel resolution
+    await installWithRetry(micropip, "pypdf");
     
     console.log("Loading Parser Script...");
     await pyodide.runPythonAsync(PYTHON_SCRIPT);
