@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useMemo, Suspense } from 'react';
 import { createRoot } from 'react-dom/client';
 import { Article, Source, ArticleMetadata } from './types';
-import { getAllData, saveArticleToDB, saveFileToDB, saveSourceToDB, getFileFromDB, deleteSourceFromDB, deleteArticleFromDB, deleteFileFromDB } from './db';
+import { getAllData, saveArticleToDB, saveFileToDB, saveSourceToDB, getFileFromDB, deleteSourceFromDB, deleteArticleFromDB, deleteFileFromDB, clearDatabase, restoreSession } from './db';
 import { Sidebar } from './components/Sidebar';
 import { ArticleList } from './components/ArticleList';
 import { ArticleDetail } from './components/ArticleDetail';
@@ -166,6 +166,80 @@ const LibrarianApp = () => {
     if (e.target) e.target.value = ""; // Reset input
   };
 
+  const handleSaveSession = async () => {
+    try {
+      const { sources, articles } = await getAllData();
+      const session = {
+        timestamp: Date.now(),
+        sources,
+        articles
+      };
+      const blob = new Blob([JSON.stringify(session, null, 2)], { type: 'application/json' });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = `librarian-session-${new Date().toISOString().slice(0,10)}.json`;
+      a.click();
+      URL.revokeObjectURL(url);
+    } catch (err) {
+      console.error("Save session failed", err);
+      alert("Failed to save session.");
+    }
+  };
+
+  const handleResetSession = async () => {
+    if (window.confirm("Are you sure you want to reset the session? All imported data will be lost.")) {
+      try {
+        await clearDatabase();
+        setSources([]);
+        setArticles([]);
+        setSelectedArticleId(null);
+        setActiveSourceId(null);
+        setSearchQuery('');
+      } catch (err) {
+        console.error("Reset session failed", err);
+        alert("Failed to reset session.");
+      }
+    }
+  };
+
+  const handleImportSession = async () => {
+    const input = document.createElement('input');
+    input.type = 'file';
+    input.accept = 'application/json';
+    input.onchange = async (e) => {
+      const file = (e.target as HTMLInputElement).files?.[0];
+      if (!file) return;
+
+      if (!window.confirm("Importing a session will replace all current data. Continue?")) return;
+      
+      try {
+        const text = await file.text();
+        const session = JSON.parse(text);
+        
+        if (!Array.isArray(session.sources) || !Array.isArray(session.articles)) {
+          alert("Invalid session file format. Missing sources or articles.");
+          return;
+        }
+
+        // Reset first
+        await clearDatabase();
+        
+        // Restore
+        await restoreSession(session.sources, session.articles);
+        setSources(session.sources);
+        setArticles(session.articles);
+        setSelectedArticleId(null);
+        setActiveSourceId(null);
+        setSearchQuery('');
+      } catch (err) {
+        console.error("Import session failed", err);
+        alert("Failed to import session. The file might be corrupted.");
+      }
+    };
+    input.click();
+  };
+
   const filteredArticles = useMemo(() => {
     let list = activeSourceId 
       ? articles.filter(a => a.sourceId === activeSourceId)
@@ -207,6 +281,9 @@ const LibrarianApp = () => {
         onSelectArticle={setSelectedArticleId}
         searchQuery={searchQuery}
         onSearchChange={setSearchQuery}
+        onSaveSession={handleSaveSession}
+        onImportSession={handleImportSession}
+        onResetSession={handleResetSession}
       />
 
       <ArticleDetail 

@@ -85,3 +85,30 @@ export const getAllData = async (): Promise<{ sources: Source[], articles: Artic
   ]);
   return { sources, articles };
 };
+
+export const clearDatabase = async () => {
+  const db = await openDB();
+  const stores = ['articles', 'sources', 'files'];
+  const tx = db.transaction(stores, 'readwrite');
+  stores.forEach(store => tx.objectStore(store).clear());
+  return new Promise<void>((resolve, reject) => {
+    tx.oncomplete = () => resolve();
+    tx.onerror = () => reject(tx.error);
+  });
+};
+
+export const restoreSession = async (sources: Source[], articles: Article[]) => {
+   const db = await openDB();
+   const tx = db.transaction(['sources', 'articles'], 'readwrite');
+   
+   const sourceStore = tx.objectStore('sources');
+   sources.forEach(s => sourceStore.put(s));
+   
+   const articleStore = tx.objectStore('articles');
+   articles.forEach(a => articleStore.put(a));
+   
+   return new Promise<void>((resolve, reject) => {
+     tx.oncomplete = () => resolve();
+     tx.onerror = () => reject(tx.error);
+   });
+};
