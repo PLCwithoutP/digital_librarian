@@ -1,7 +1,6 @@
-
 import React, { useState, useEffect, useMemo, Suspense } from 'react';
 import { createRoot } from 'react-dom/client';
-import { Article, Source } from './types';
+import { Article, Source, ArticleMetadata } from './types';
 import { getAllData, saveArticleToDB, saveFileToDB, saveSourceToDB, getFileFromDB } from './db';
 import { Sidebar } from './components/Sidebar';
 import { ArticleList } from './components/ArticleList';
@@ -34,17 +33,95 @@ const LibrarianApp = () => {
 
     const sourceId = crypto.randomUUID();
     const firstFile = files[0] as any;
-    const sourceName = firstFile.webkitRelativePath?.split('/')[0] || `Source ${sources.length + 1}`;
+    const pathParts = firstFile.webkitRelativePath?.split('/') || [];
+    const sourceName = pathParts.length > 1 ? pathParts[0] : `Source ${sources.length + 1}`;
+    
     const newSource: Source = { id: sourceId, name: sourceName };
 
     setSources(prev => [...prev, newSource]);
     await saveSourceToDB(newSource);
 
+    // 1. Process Metadata JSON files first
+    const fileList: File[] = Array.from(files);
+    const jsonFiles = fileList.filter(f => f.name.toLowerCase().endsWith('.json'));
+    const pdfMetadataMap = new Map<string, any>();
+
+    for (const jsonFile of jsonFiles) {
+        try {
+            const text = await jsonFile.text();
+            const data = JSON.parse(text);
+            if (data.pdfs && Array.isArray(data.pdfs)) {
+                data.pdfs.forEach((pdf: any) => {
+                    if (pdf.file_name) {
+                        pdfMetadataMap.set(pdf.file_name, pdf);
+                    }
+                });
+            }
+        } catch (err) {
+            console.warn(`Failed to parse metadata file ${jsonFile.name}:`, err);
+        }
+    }
+
     const newArticles: Article[] = [];
     
-    for (let i = 0; i < files.length; i++) {
-      const file = files[i];
+    for (const file of fileList) {
       if (file.type !== 'application/pdf' && !file.name.toLowerCase().endsWith('.pdf')) continue;
+
+      const meta = pdfMetadataMap.get(file.name);
+      let articleMetadata: ArticleMetadata | undefined = undefined;
+
+      if (meta) {
+          // Extract keywords
+          let keywords: string[] = [];
+          if (meta.pdf_meta && meta.pdf_meta['/Keywords']) {
+             // Keywords in PDF metadata are often separated by ; or ,
+             keywords = meta.pdf_meta['/Keywords'].split(/[;,]/)
+                .map((k: string) => k.trim())
+                .filter((k: string) => k);
+          } else if (Array.isArray(meta.keywords)) {
+             keywords = meta.keywords;
+          }
+
+          // Extract categories (Subject)
+          let categories: string[] = [];
+          if (meta.pdf_meta && meta.pdf_meta['/Subject']) {
+              const subj = meta.pdf_meta['/Subject'].trim();
+              // Heuristic: if subject is reasonably short, treat as category. 
+              if (subj) categories.push(subj);
+          }
+          if (categories.length === 0 && meta.categories && Array.isArray(meta.categories)) {
+              categories = meta.categories;
+          }
+          if (categories.length === 0) categories.push("Uncategorized");
+
+          // Extract Year
+          let year = "Unknown";
+          if (meta.year) {
+              year = String(meta.year);
+          } else if (meta.pdf_meta && meta.pdf_meta['/CreationDate']) {
+              // Format D:YYYYMMDD...
+              const match = meta.pdf_meta['/CreationDate'].match(/D:(\d{4})/);
+              if (match) year = match[1];
+          }
+
+          // Extract Authors
+          let authors: string[] = [];
+          if (Array.isArray(meta.authors)) {
+              authors = meta.authors;
+          } else if (meta.pdf_meta && meta.pdf_meta['/Author']) {
+              authors = [meta.pdf_meta['/Author']];
+          }
+          if (authors.length === 0) authors = ["Unknown Author"];
+
+          articleMetadata = {
+              title: meta.title || meta.pdf_meta?.['/Title'] || file.name.replace('.pdf', ''),
+              authors: authors,
+              year: year,
+              abstract: meta.abstract || "",
+              keywords: keywords,
+              categories: categories
+          };
+      }
 
       const articleId = crypto.randomUUID();
       const article: Article = {
@@ -53,7 +130,8 @@ const LibrarianApp = () => {
         fileName: file.name,
         fileSize: file.size,
         addedAt: Date.now(),
-        status: 'completed' // Marked as completed immediately, metadata will be empty for now
+        status: 'completed',
+        metadata: articleMetadata
       };
       
       newArticles.push(article);
