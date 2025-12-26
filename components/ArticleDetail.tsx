@@ -1,5 +1,5 @@
 
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import ReactMarkdown from 'react-markdown';
 import { Article, ArticleMetadata, Note } from '../types';
 import { getFileFromDB } from '../db';
@@ -23,6 +23,20 @@ export const ArticleDetail: React.FC<ArticleDetailProps> = ({
 }) => {
   const [newKeyword, setNewKeyword] = useState('');
   const [newCategory, setNewCategory] = useState('');
+  const [isEditingTitle, setIsEditingTitle] = useState(false);
+  const [titleInput, setTitleInput] = useState('');
+  const [isEditingAuthors, setIsEditingAuthors] = useState(false);
+  const [authorsInput, setAuthorsInput] = useState('');
+
+  // Update title/author input when article changes
+  useEffect(() => {
+    if (article) {
+        setTitleInput(article.metadata?.title || article.fileName);
+        setAuthorsInput(article.metadata?.authors?.join(', ') || '');
+        setIsEditingTitle(false);
+        setIsEditingAuthors(false);
+    }
+  }, [article]);
 
   if (!article) return (
     <div className={`fixed inset-y-0 right-0 w-[450px] bg-white dark:bg-slate-900 shadow-2xl transform transition-transform duration-300 ease-in-out border-l border-slate-200 dark:border-slate-800 flex flex-col z-20 translate-x-full`}></div>
@@ -68,6 +82,23 @@ export const ArticleDetail: React.FC<ArticleDetailProps> = ({
       });
   };
 
+  const handleSaveTitle = () => {
+      if (titleInput.trim()) {
+          onUpdateMetadata(article.id, { title: titleInput.trim() });
+          setIsEditingTitle(false);
+      } else {
+          // Revert if empty
+          setTitleInput(article.metadata?.title || article.fileName);
+          setIsEditingTitle(false);
+      }
+  };
+
+  const handleSaveAuthors = () => {
+      const newAuthors = authorsInput.split(',').map(s => s.trim()).filter(s => s.length > 0);
+      onUpdateMetadata(article.id, { authors: newAuthors.length > 0 ? newAuthors : ["Unknown"] });
+      setIsEditingAuthors(false);
+  };
+
   return (
     <div className={`fixed inset-y-0 right-0 w-[450px] bg-white dark:bg-slate-900 shadow-2xl transform transition-transform duration-300 ease-in-out border-l border-slate-200 dark:border-slate-800 flex flex-col z-20 translate-x-0`}>
         <>
@@ -85,14 +116,83 @@ export const ArticleDetail: React.FC<ArticleDetailProps> = ({
           
           <div className="flex-1 overflow-y-auto p-8 bg-white dark:bg-slate-900">
             <div className="space-y-8">
-              <header>
-                <h3 className="text-2xl font-serif font-bold leading-tight text-slate-900 dark:text-slate-100 mb-4">
-                  {article.metadata?.title || article.fileName}
-                </h3>
-                <div className="space-y-2">
-                  <div className="flex gap-2 text-sm">
-                    <span className="font-semibold text-slate-500 dark:text-slate-400 w-16">Authors:</span>
-                    <span className="text-slate-700 dark:text-slate-300 flex-1">{article.metadata?.authors?.join(', ') || 'Unknown'}</span>
+              <header className="group">
+                {isEditingTitle ? (
+                    <div className="mb-4">
+                        <textarea
+                            className="w-full text-2xl font-serif font-bold leading-tight text-slate-900 dark:text-slate-100 bg-white dark:bg-slate-800 border-2 border-indigo-500 rounded p-2 focus:outline-none resize-none"
+                            value={titleInput}
+                            onChange={(e) => setTitleInput(e.target.value)}
+                            onBlur={handleSaveTitle}
+                            onKeyDown={(e) => {
+                                if (e.key === 'Enter') {
+                                    e.preventDefault();
+                                    handleSaveTitle();
+                                }
+                                if (e.key === 'Escape') {
+                                    setIsEditingTitle(false);
+                                    setTitleInput(article.metadata?.title || article.fileName);
+                                }
+                            }}
+                            autoFocus
+                            rows={3}
+                        />
+                        <div className="text-xs text-slate-500 mt-1">Press Enter to save, Esc to cancel</div>
+                    </div>
+                ) : (
+                    <h3 
+                        className="text-2xl font-serif font-bold leading-tight text-slate-900 dark:text-slate-100 mb-4 cursor-pointer hover:text-indigo-600 dark:hover:text-indigo-400 transition-colors relative"
+                        onClick={() => setIsEditingTitle(true)}
+                        title="Click to edit title"
+                    >
+                        {article.metadata?.title || article.fileName}
+                        <button className="absolute -left-6 top-1.5 text-slate-300 hover:text-indigo-500 opacity-0 group-hover:opacity-100 transition-opacity">
+                            <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15.232 5.232l3.536 3.536m-2.036-5.036a2.5 2.5 0 113.536 3.536L6.5 21.036H3v-3.572L16.732 3.732z" />
+                            </svg>
+                        </button>
+                    </h3>
+                )}
+
+                <div className="space-y-3">
+                  <div className="flex gap-2 text-sm group/authors">
+                    <span className="font-semibold text-slate-500 dark:text-slate-400 w-16 pt-1">Authors:</span>
+                    {isEditingAuthors ? (
+                        <div className="flex-1">
+                            <textarea
+                                className="w-full text-sm text-slate-700 dark:text-slate-300 bg-white dark:bg-slate-800 border border-indigo-500 rounded p-1 focus:outline-none resize-none"
+                                value={authorsInput}
+                                onChange={(e) => setAuthorsInput(e.target.value)}
+                                onBlur={handleSaveAuthors}
+                                onKeyDown={(e) => {
+                                    if (e.key === 'Enter') {
+                                        e.preventDefault();
+                                        handleSaveAuthors();
+                                    }
+                                    if (e.key === 'Escape') {
+                                        setIsEditingAuthors(false);
+                                        setAuthorsInput(article.metadata?.authors?.join(', ') || '');
+                                    }
+                                }}
+                                autoFocus
+                                rows={2}
+                            />
+                            <div className="text-[10px] text-slate-400 mt-0.5">Separate multiple authors with commas. Enter to save.</div>
+                        </div>
+                    ) : (
+                        <span 
+                            className="text-slate-700 dark:text-slate-300 flex-1 cursor-pointer hover:text-indigo-600 dark:hover:text-indigo-400 transition-colors relative pt-1"
+                            onClick={() => setIsEditingAuthors(true)}
+                            title="Click to edit authors"
+                        >
+                            {article.metadata?.authors?.join(', ') || 'Unknown'}
+                            <button className="inline-block ml-2 text-slate-300 hover:text-indigo-500 opacity-0 group-hover/authors:opacity-100 transition-opacity">
+                                <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15.232 5.232l3.536 3.536m-2.036-5.036a2.5 2.5 0 113.536 3.536L6.5 21.036H3v-3.572L16.732 3.732z" />
+                                </svg>
+                            </button>
+                        </span>
+                    )}
                   </div>
                   <div className="flex gap-2 text-sm">
                     <span className="font-semibold text-slate-500 dark:text-slate-400 w-16">Year:</span>

@@ -391,7 +391,7 @@ const LibrarianApp = () => {
   };
 
   const handleResetSession = async () => {
-    if (window.confirm("Are you sure you want to reset the session? All imported data will be lost.")) {
+    if (window.confirm("Are you sure you want to delete all articles from the library? This action removes them from the Librarian UI but does not delete files from your disk.")) {
       try {
         await clearDatabase();
         setSources([]);
@@ -403,8 +403,8 @@ const LibrarianApp = () => {
         setIsGrouped(false);
         setSortConfig(null);
       } catch (err) {
-        console.error("Reset session failed", err);
-        alert("Failed to reset session.");
+        console.error("Delete all articles failed", err);
+        alert("Failed to delete articles.");
       }
     }
   };
