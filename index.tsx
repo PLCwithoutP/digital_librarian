@@ -611,21 +611,34 @@ const LibrarianApp = () => {
     }
   };
 
-  const handleResetSession = async () => {
-    if (window.confirm("Are you sure you want to delete all articles from the library? This action removes them from the Librarian UI but does not delete files from your disk.")) {
+  const handleDeleteSelected = async () => {
+    if (checkedArticleIds.size === 0) return;
+
+    if (window.confirm(`Are you sure you want to delete ${checkedArticleIds.size} selected articles?`)) {
       try {
-        await clearDatabase();
-        setSources([]);
-        setArticles([]);
-        setNotes([]);
-        setSelectedArticleId(null);
-        setActiveSourceId(null);
-        setSearchQuery('');
-        setIsGrouped(false);
-        setSortConfig(null);
+        const idsToDelete = Array.from(checkedArticleIds);
+        
+        // 1. Delete Articles and Files from DB
+        await Promise.all(idsToDelete.map(async (id) => {
+            await deleteArticleFromDB(id);
+            await deleteFileFromDB(id);
+        }));
+        
+        // 2. Delete associated notes from DB
+        const notesToDelete = notes.filter(n => n.type === 'article' && n.targetId && checkedArticleIds.has(n.targetId));
+        await Promise.all(notesToDelete.map(n => deleteNoteFromDB(n.id)));
+
+        // 3. Update State
+        setArticles(prev => prev.filter(a => !checkedArticleIds.has(a.id)));
+        setNotes(prev => prev.filter(n => !(n.type === 'article' && n.targetId && checkedArticleIds.has(n.targetId))));
+        
         setCheckedArticleIds(new Set());
+        
+        if (selectedArticleId && checkedArticleIds.has(selectedArticleId)) {
+            setSelectedArticleId(null);
+        }
       } catch (err) {
-        console.error("Delete all articles failed", err);
+        console.error("Delete articles failed", err);
         alert("Failed to delete articles.");
       }
     }
@@ -782,7 +795,7 @@ const LibrarianApp = () => {
         onSearchChange={setSearchQuery}
         onSaveSession={handleSaveSession}
         onImportSession={handleImportSession}
-        onResetSession={handleResetSession}
+        onDeleteSelected={handleDeleteSelected}
         isGrouped={isGrouped}
         onToggleGroup={() => setIsGrouped(prev => !prev)}
         sortConfig={sortConfig}
