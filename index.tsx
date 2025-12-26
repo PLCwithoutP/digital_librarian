@@ -90,10 +90,22 @@ const LibrarianApp = () => {
           try {
               const text = await jsonFile.text();
               const data = JSON.parse(text);
+              
+              // Handle 'pdfs' key (Standard format)
               if (data.pdfs && Array.isArray(data.pdfs)) {
                   data.pdfs.forEach((pdf: any) => {
                       if (pdf.file_name) {
                           pdfMetadataMap.set(pdf.file_name, pdf);
+                      }
+                  });
+              }
+
+              // Handle 'entries' key (BibTeX JSON format)
+              if (data.entries && Array.isArray(data.entries)) {
+                  data.entries.forEach((entry: any) => {
+                      if (entry.file_name) {
+                          const existing = pdfMetadataMap.get(entry.file_name) || {};
+                          pdfMetadataMap.set(entry.file_name, { ...existing, ...entry });
                       }
                   });
               }
