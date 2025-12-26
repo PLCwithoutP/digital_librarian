@@ -372,9 +372,36 @@ const LibrarianApp = () => {
         // --- TeX Format ---
         else if (options.format === '.tex') {
             const formatTexContent = (text: string) => {
-                // Wrap words containing _ or ^ in $...$
-                // Ex: x_j -> $x_j$
-                return text.replace(/([a-zA-Z0-9\\{}[\]()+\-=/*]*[_\^][a-zA-Z0-9\\{}[\]()+\-=/*]*)/g, "$$$1$$");
+                // 1. Preserve explicit escapes \_ and \^
+                let out = text.replace(/\\_/g, '@@ESC-US@@')
+                              .replace(/\\\^/g, '@@ESC-CARET@@');
+                
+                // 2. Escape other special chars
+                out = out.replace(/[\\#$|%&{}~]/g, (match) => {
+                    switch (match) {
+                        case '\\': return '\\textbackslash{}';
+                        case '#': return '\\#';
+                        case '$': return '\\$';
+                        case '%': return '\\%';
+                        case '&': return '\\&';
+                        case '{': return '\\{';
+                        case '}': return '\\}';
+                        case '~': return '\\textasciitilde{}';
+                        case '|': return '\\textbar{}';
+                        default: return match;
+                    }
+                });
+
+                // 3. Wrap math-like words (containing _ or ^) in $...$
+                out = out.replace(/(\S*[_\^]\S*)/g, (match) => {
+                     return `$${match}$`;
+                });
+                
+                // 4. Restore explicit escapes
+                out = out.replace(/@@ESC-US@@/g, '\\_')
+                         .replace(/@@ESC-CARET@@/g, '\\^');
+                         
+                return out;
             };
 
             content += `\\documentclass{article}\n\\usepackage{amsmath}\n\\title{Notes of Librarian}\n\\begin{document}\n\\maketitle\n\n`;
@@ -401,13 +428,51 @@ const LibrarianApp = () => {
                 });
             }
 
+            const referencedArticleIds = new Set<string>();
+
             if (articleNotes.length > 0) {
                 content += `\\section{Article-specific Notes}\n`;
                 articleNotes.forEach(n => {
+                    if (n.targetId) referencedArticleIds.add(n.targetId);
                     const art = articles.find(a => a.id === n.targetId);
                     const artTitle = art?.metadata?.title || art?.fileName || "Unknown Article";
                     content += `\\subsection{${n.title}}\nThis subsection belongs to \\textit{${artTitle}}.\n\n${formatTexContent(n.content)}\n\n`;
                 });
+            }
+
+            // Append \nocite for each article referenced in notes
+            if (referencedArticleIds.size > 0) {
+                const referencedArticles = articles.filter(a => referencedArticleIds.has(a.id));
+                const noteBibtexEntries: string[] = [];
+                const noteCitationKeys: Set<string> = new Set();
+
+                referencedArticles.forEach(a => {
+                    const bib = a.metadata?.bibtex;
+                    if (bib) {
+                        noteBibtexEntries.push(bib);
+                        const match = bib.match(/@\w+\s*\{\s*([^,]+),/);
+                        if (match && match[1]) {
+                            noteCitationKeys.add(match[1].trim());
+                        }
+                    }
+                });
+
+                if (noteCitationKeys.size > 0) {
+                    noteCitationKeys.forEach(key => {
+                        content += `\\nocite{${key}}\n`;
+                    });
+                    content += `\n\\clearpage\n\\bibliographystyle{plain}\n\\bibliography{references_for_notes_1}\n`;
+                }
+
+                if (noteBibtexEntries.length > 0) {
+                    const bibBlob = new Blob([noteBibtexEntries.join('\n\n')], { type: 'text/plain' });
+                    const bibUrl = URL.createObjectURL(bibBlob);
+                    const bibLink = document.createElement('a');
+                    bibLink.href = bibUrl;
+                    bibLink.download = 'references_for_notes_1.bib';
+                    bibLink.click();
+                    URL.revokeObjectURL(bibUrl);
+                }
             }
 
             content += `\\end{document}`;
