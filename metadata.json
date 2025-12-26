@@ -1,5 +1,5 @@
 {
-  "description": "Digital Librarian: An AI-powered PDF library manager for academic articles, featuring multi-source folder support and automated metadata extraction via Gemini 3 Flash.",
+  "description": "Digital Librarian: An offline PDF library manager for academic articles, featuring multi-source folder support and automated heuristic metadata extraction.",
   "requestFramePermissions": [],
   "name": "App"
 }

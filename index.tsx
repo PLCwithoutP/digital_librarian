@@ -1,11 +1,10 @@
 
-import React, { useState, useEffect, useRef, useMemo } from 'react';
+import React, { useState, useEffect, useRef, useMemo, Suspense } from 'react';
 import { createRoot } from 'react-dom/client';
-import { GoogleGenAI, Type } from "@google/genai";
 import * as pdfjsLib from 'pdfjs-dist';
 
-// Initialize PDF.js worker
-pdfjsLib.GlobalWorkerOptions.workerSrc = `https://cdnjs.cloudflare.com/ajax/libs/pdf.js/${pdfjsLib.version}/pdf.worker.min.mjs`;
+// Initialize PDF.js worker with a stable CDN URL
+pdfjsLib.GlobalWorkerOptions.workerSrc = `https://unpkg.com/pdfjs-dist@5.4.449/build/pdf.worker.min.mjs`;
 
 // Types
 interface ArticleMetadata {
@@ -57,7 +56,7 @@ const openDB = (): Promise<IDBDatabase> => {
   });
 };
 
-const App = () => {
+const LibrarianApp = () => {
   const [sources, setSources] = useState<Source[]>([]);
   const [articles, setArticles] = useState<Article[]>([]);
   const [selectedArticleId, setSelectedArticleId] = useState<string | null>(null);
@@ -67,11 +66,14 @@ const App = () => {
   
   const fileInputRef = useRef<HTMLInputElement>(null);
 
-  // Set non-standard attributes manually to avoid React Error #299
+  // Set non-standard attributes manually on the DOM node to avoid React prop validation errors
   useEffect(() => {
-    if (fileInputRef.current) {
-      fileInputRef.current.setAttribute("webkitdirectory", "");
-      fileInputRef.current.setAttribute("directory", "");
+    const el = fileInputRef.current;
+    if (el) {
+      (el as any).webkitdirectory = true;
+      (el as any).directory = true;
+      el.setAttribute("webkitdirectory", "");
+      el.setAttribute("directory", "");
     }
   }, []);
 
@@ -80,21 +82,24 @@ const App = () => {
     const loadData = async () => {
       try {
         const db = await openDB();
-        const sourcesTx = db.transaction('sources', 'readonly');
-        const articlesTx = db.transaction('articles', 'readonly');
         
-        const sourcesStore = sourcesTx.objectStore('sources');
-        const articlesStore = articlesTx.objectStore('articles');
-
-        const loadedSources: Source[] = await new Promise((res) => {
-          const req = sourcesStore.getAll();
-          req.onsuccess = () => res(req.result);
-        });
-
-        const loadedArticles: Article[] = await new Promise((res) => {
-          const req = articlesStore.getAll();
-          req.onsuccess = () => res(req.result);
-        });
+        // Use Promise.all to fetch data in parallel. 
+        // This ensures both transactions are created and used immediately, 
+        // preventing one from auto-committing while the other is awaited.
+        const [loadedSources, loadedArticles] = await Promise.all([
+          new Promise<Source[]>((resolve, reject) => {
+            const tx = db.transaction('sources', 'readonly');
+            const req = tx.objectStore('sources').getAll();
+            req.onsuccess = () => resolve(req.result);
+            req.onerror = () => reject(req.error);
+          }),
+          new Promise<Article[]>((resolve, reject) => {
+            const tx = db.transaction('articles', 'readonly');
+            const req = tx.objectStore('articles').getAll();
+            req.onsuccess = () => resolve(req.result);
+            req.onerror = () => reject(req.error);
+          })
+        ]);
 
         setSources(loadedSources);
         setArticles(loadedArticles);
@@ -132,57 +137,108 @@ const App = () => {
     });
   };
 
-  const extractTextFromPDF = async (file: File | Blob): Promise<string> => {
+  // Improved extraction that gets both Text and PDF Info Dictionary
+  const extractPdfData = async (file: File | Blob) => {
     const arrayBuffer = await file.arrayBuffer();
-    const pdf = await pdfjsLib.getDocument({ data: arrayBuffer }).promise;
+    const loadingTask = pdfjsLib.getDocument({ data: arrayBuffer });
+    const pdf = await loadingTask.promise;
+    
+    // Extract Metadata (Info Dict)
+    let info: any = {};
+    try {
+        const metadata = await pdf.getMetadata();
+        info = metadata.info || {};
+    } catch (e) {
+        console.warn("Could not extract metadata", e);
+    }
+
+    // Extract Text (First 3 pages)
     let fullText = '';
-    const pagesToRead = Math.min(pdf.numPages, 5);
+    const pagesToRead = Math.min(pdf.numPages, 3);
     for (let i = 1; i <= pagesToRead; i++) {
       const page = await pdf.getPage(i);
       const textContent = await page.getTextContent();
       const pageText = textContent.items.map((item: any) => item.str).join(' ');
-      fullText += pageText + '\n';
+      fullText += pageText + '\n\n';
     }
-    return fullText;
+    return { text: fullText, info };
   };
 
-  const processArticleMetadata = async (article: Article, pdfText: string) => {
-    const ai = new GoogleGenAI({ apiKey: process.env.API_KEY || '' });
+  // Heuristic-based parsing without AI
+  const parseMetadataHeuristic = (text: string, info: any, fileName: string): ArticleMetadata => {
+    let title = info.Title;
     
-    try {
-      const response = await ai.models.generateContent({
-        model: "gemini-3-flash-preview",
-        contents: `Extract scholarly metadata from the following PDF text excerpt. 
-        If an abstract is explicitly found, use it. Otherwise, summarize the first 3 paragraphs as the abstract.
-        Text: ${pdfText.substring(0, 8000)}`,
-        config: {
-          responseMimeType: "application/json",
-          responseSchema: {
-            type: Type.OBJECT,
-            properties: {
-              title: { type: Type.STRING },
-              authors: { type: Type.ARRAY, items: { type: Type.STRING } },
-              year: { type: Type.STRING },
-              categories: { type: Type.ARRAY, items: { type: Type.STRING } },
-              keywords: { type: Type.ARRAY, items: { type: Type.STRING } },
-              abstract: { type: Type.STRING },
-            },
-            required: ["title", "authors", "year", "categories", "keywords", "abstract"]
-          }
+    // Validate Title
+    if (title) {
+        title = title.trim();
+        // Common placeholder titles to ignore
+        if (title.toLowerCase() === 'untitled' || title.toLowerCase().includes('microsoft word') || title.length < 3) {
+            title = '';
         }
-      });
-
-      const metadata: ArticleMetadata = JSON.parse(response.text || '{}');
-      const updatedArticle: Article = { ...article, metadata, status: 'completed' };
-      
-      setArticles(prev => prev.map(a => a.id === article.id ? updatedArticle : a));
-      saveArticleToDB(updatedArticle);
-    } catch (err) {
-      console.error("AI processing failed", err);
-      const errorArticle: Article = { ...article, status: 'error' };
-      setArticles(prev => prev.map(a => a.id === article.id ? errorArticle : a));
-      saveArticleToDB(errorArticle);
     }
+    
+    // Fallback Title from filename
+    if (!title) {
+        title = fileName.replace(/\.pdf$/i, '');
+    }
+
+    // Authors
+    let authors: string[] = [];
+    if (info.Author && info.Author.trim()) {
+        // Attempt to split if multiple authors are listed with common delimiters
+        authors = info.Author.split(/;|,(?=\s[A-Z])/).map((s: string) => s.trim()).filter((s: string) => s.length > 0);
+    }
+    if (authors.length === 0) {
+        authors = ["Unknown Author"];
+    }
+
+    // Year
+    let year = "Unknown";
+    // Try CreationDate (Format D:YYYYMMDD...)
+    if (info.CreationDate) {
+        const match = info.CreationDate.match(/D:(\d{4})/);
+        if (match) year = match[1];
+    }
+    // Fallback to text search for year (19xx or 20xx)
+    if (year === "Unknown") {
+        const match = text.match(/\b(19|20)\d{2}\b/);
+        if (match) year = match[0];
+    }
+
+    // Keywords
+    let keywords: string[] = [];
+    if (info.Keywords && info.Keywords.trim()) {
+        keywords = info.Keywords.split(/[,;]/).map((k: string) => k.trim()).filter(Boolean);
+    }
+
+    // Categories (Placeholder as this is hard without AI, unless Subject exists)
+    let categories: string[] = ["Uncategorized"];
+    if (info.Subject) {
+        categories = [info.Subject];
+    }
+
+    // Abstract
+    let abstract = "";
+    // Regex look for Abstract section
+    // Look for "Abstract" followed by content, stopping at common next section headers
+    const abstractMatch = text.match(/(?:abstract|summary)[:\s.\n]+([\s\S]{50,1500}?)(?=(?:introduction|keywords|conclusion|references|1\.)|\n\n\n)/i);
+    
+    if (abstractMatch && abstractMatch[1]) {
+        abstract = abstractMatch[1].replace(/\s+/g, ' ').trim();
+    } else {
+        // Heuristic: First paragraph that is long enough (skipping potential headers)
+        // Simple fallback: just take the start of the text
+        abstract = text.substring(0, 400).replace(/\s+/g, ' ').trim() + "...";
+    }
+
+    return {
+        title,
+        authors,
+        year,
+        categories,
+        keywords,
+        abstract
+    };
   };
 
   const handleAddSource = async (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -191,7 +247,9 @@ const App = () => {
 
     setIsProcessing(true);
     const sourceId = crypto.randomUUID();
-    const sourceName = files[0].webkitRelativePath.split('/')[0] || `Source ${sources.length + 1}`;
+    // Safely access webkitRelativePath for source naming
+    const firstFile = files[0] as any;
+    const sourceName = firstFile.webkitRelativePath?.split('/')[0] || `Source ${sources.length + 1}`;
     const newSource: Source = { id: sourceId, name: sourceName };
 
     setSources(prev => [...prev, newSource]);
@@ -201,7 +259,7 @@ const App = () => {
     
     for (let i = 0; i < files.length; i++) {
       const file = files[i];
-      if (file.type !== 'application/pdf') continue;
+      if (file.type !== 'application/pdf' && !file.name.toLowerCase().endsWith('.pdf')) continue;
 
       const articleId = crypto.randomUUID();
       const article: Article = {
@@ -220,18 +278,26 @@ const App = () => {
 
     setArticles(prev => [...prev, ...newArticles]);
 
-    // Process metadata in sequence or chunks to avoid overwhelming memory/network
+    // Process metadata for newly added articles
     for (const article of newArticles) {
       const blob = await getFileFromDB(article.id);
       if (blob) {
         setArticles(prev => prev.map(a => a.id === article.id ? { ...a, status: 'processing' } : a));
         try {
-          const text = await extractTextFromPDF(blob);
-          await processArticleMetadata(article, text);
+          // Extract data and info
+          const { text, info } = await extractPdfData(blob);
+          
+          // Use AI-free heuristics
+          const metadata = parseMetadataHeuristic(text, info, article.fileName);
+          const updatedArticle: Article = { ...article, metadata, status: 'completed' };
+          
+          setArticles(prev => prev.map(a => a.id === article.id ? updatedArticle : a));
+          saveArticleToDB(updatedArticle);
         } catch (e) {
           console.error(`Failed to process ${article.fileName}`, e);
           const errorArticle: Article = { ...article, status: 'error' };
           setArticles(prev => prev.map(a => a.id === article.id ? errorArticle : a));
+          saveArticleToDB(errorArticle);
         }
       }
     }
@@ -315,6 +381,7 @@ const App = () => {
               type="file" 
               className="hidden" 
               onChange={handleAddSource}
+              multiple
             />
           </label>
           {isProcessing && (
@@ -508,7 +575,7 @@ const App = () => {
         )}
       </div>
 
-      <style>{`
+      <style dangerouslySetInnerHTML={{ __html: `
         @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap');
         
         body {
@@ -531,10 +598,16 @@ const App = () => {
         ::-webkit-scrollbar-thumb:hover {
           background: #94a3b8;
         }
-      `}</style>
+      `}} />
     </div>
   );
 };
+
+const App = () => (
+  <Suspense fallback={<div className="h-screen w-screen flex items-center justify-center bg-slate-50 text-slate-500 italic">Initializing Librarian...</div>}>
+    <LibrarianApp />
+  </Suspense>
+);
 
 const root = createRoot(document.getElementById('root')!);
 root.render(<App />);
