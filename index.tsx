@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useMemo, Suspense } from 'react';
 import { createRoot } from 'react-dom/client';
 import { Article, Source, ArticleMetadata } from './types';
-import { getAllData, saveArticleToDB, saveFileToDB, saveSourceToDB, getFileFromDB } from './db';
+import { getAllData, saveArticleToDB, saveFileToDB, saveSourceToDB, getFileFromDB, deleteSourceFromDB, deleteArticleFromDB, deleteFileFromDB } from './db';
 import { Sidebar } from './components/Sidebar';
 import { ArticleList } from './components/ArticleList';
 import { ArticleDetail } from './components/ArticleDetail';
@@ -31,17 +31,40 @@ const LibrarianApp = () => {
     const files = e.target.files;
     if (!files || files.length === 0) return;
 
-    const sourceId = crypto.randomUUID();
+    // 1. Identify Source Name
     const firstFile = files[0] as any;
     const pathParts = firstFile.webkitRelativePath?.split('/') || [];
     const sourceName = pathParts.length > 1 ? pathParts[0] : `Source ${sources.length + 1}`;
-    
+
+    // 2. Check for collision and cleanup
+    const existingSource = sources.find(s => s.name === sourceName);
+    if (existingSource) {
+      // Delete source from DB
+      await deleteSourceFromDB(existingSource.id);
+      
+      // Delete articles and files from DB
+      const articlesToDelete = articles.filter(a => a.sourceId === existingSource.id);
+      await Promise.all(articlesToDelete.map(async (article) => {
+        await deleteArticleFromDB(article.id);
+        await deleteFileFromDB(article.id);
+      }));
+
+      // Update State (Remove old)
+      setSources(prev => prev.filter(s => s.id !== existingSource.id));
+      setArticles(prev => prev.filter(a => a.sourceId !== existingSource.id));
+
+      // Reset selection if needed
+      if (activeSourceId === existingSource.id) setActiveSourceId(null);
+      if (selectedArticleId && articlesToDelete.find(a => a.id === selectedArticleId)) setSelectedArticleId(null);
+    }
+
+    const sourceId = crypto.randomUUID();
     const newSource: Source = { id: sourceId, name: sourceName };
 
     setSources(prev => [...prev, newSource]);
     await saveSourceToDB(newSource);
 
-    // 1. Process Metadata JSON files first
+    // 3. Process Metadata JSON files first
     const fileList: File[] = Array.from(files);
     const jsonFiles = fileList.filter(f => f.name.toLowerCase().endsWith('.json'));
     const pdfMetadataMap = new Map<string, any>();

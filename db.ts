@@ -51,6 +51,24 @@ export const getFileFromDB = async (id: string): Promise<Blob | null> => {
   });
 };
 
+export const deleteSourceFromDB = async (id: string) => {
+  const db = await openDB();
+  const tx = db.transaction('sources', 'readwrite');
+  tx.objectStore('sources').delete(id);
+};
+
+export const deleteArticleFromDB = async (id: string) => {
+  const db = await openDB();
+  const tx = db.transaction('articles', 'readwrite');
+  tx.objectStore('articles').delete(id);
+};
+
+export const deleteFileFromDB = async (id: string) => {
+  const db = await openDB();
+  const tx = db.transaction('files', 'readwrite');
+  tx.objectStore('files').delete(id);
+};
+
 export const getAllData = async (): Promise<{ sources: Source[], articles: Article[] }> => {
   const db = await openDB();
   const [sources, articles] = await Promise.all([
