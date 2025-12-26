@@ -13,6 +13,7 @@ const LibrarianApp = () => {
   const [searchQuery, setSearchQuery] = useState('');
   const [activeSourceId, setActiveSourceId] = useState<string | null>(null);
   const [isGrouped, setIsGrouped] = useState(false);
+  const [sortConfig, setSortConfig] = useState<{ key: string; direction: 'asc' | 'desc' } | null>(null);
 
   // Load data on mount
   useEffect(() => {
@@ -137,20 +138,13 @@ const LibrarianApp = () => {
           }
           if (authors.length === 0) authors = ["Unknown Author"];
           
-          // Extract Type
-          let type = "Non-Deducted";
-          if (meta.type) {
-              type = meta.type;
-          }
-
           articleMetadata = {
               title: meta.title || meta.pdf_meta?.['/Title'] || file.name.replace('.pdf', ''),
               authors: authors,
               year: year,
               abstract: meta.abstract || "",
               keywords: keywords,
-              categories: categories,
-              type: type
+              categories: categories
           };
       }
 
@@ -221,6 +215,7 @@ const LibrarianApp = () => {
         setActiveSourceId(null);
         setSearchQuery('');
         setIsGrouped(false);
+        setSortConfig(null);
       } catch (err) {
         console.error("Reset session failed", err);
         alert("Failed to reset session.");
@@ -258,12 +253,22 @@ const LibrarianApp = () => {
         setActiveSourceId(null);
         setSearchQuery('');
         setIsGrouped(false);
+        setSortConfig(null);
       } catch (err) {
         console.error("Import session failed", err);
         alert("Failed to import session. The file might be corrupted.");
       }
     };
     input.click();
+  };
+
+  const handleSort = (key: string) => {
+    setSortConfig(current => {
+      if (current?.key === key) {
+        return { key, direction: current.direction === 'asc' ? 'desc' : 'asc' };
+      }
+      return { key, direction: 'asc' };
+    });
   };
 
   const filteredArticles = useMemo(() => {
@@ -286,8 +291,39 @@ const LibrarianApp = () => {
       });
     }
 
-    return list.sort((a, b) => b.addedAt - a.addedAt);
-  }, [articles, activeSourceId, searchQuery]);
+    if (sortConfig) {
+      list.sort((a, b) => {
+        let valA: string | number = '';
+        let valB: string | number = '';
+
+        switch(sortConfig.key) {
+          case 'publication':
+            valA = (a.metadata?.title || a.fileName).toLowerCase();
+            valB = (b.metadata?.title || b.fileName).toLowerCase();
+            break;
+          case 'authors':
+            valA = (a.metadata?.authors?.[0] || '').toLowerCase();
+            valB = (b.metadata?.authors?.[0] || '').toLowerCase();
+            break;
+          case 'year':
+            const yearA = parseInt(a.metadata?.year || '0', 10);
+            const yearB = parseInt(b.metadata?.year || '0', 10);
+            valA = isNaN(yearA) ? 0 : yearA;
+            valB = isNaN(yearB) ? 0 : yearB;
+            break;
+        }
+
+        if (valA < valB) return sortConfig.direction === 'asc' ? -1 : 1;
+        if (valA > valB) return sortConfig.direction === 'asc' ? 1 : -1;
+        return 0;
+      });
+    } else {
+        // Default sort by addedAt desc
+        list.sort((a, b) => b.addedAt - a.addedAt);
+    }
+
+    return [...list]; // Return new array reference
+  }, [articles, activeSourceId, searchQuery, sortConfig]);
 
   const selectedArticle = articles.find(a => a.id === selectedArticleId);
 
@@ -312,6 +348,8 @@ const LibrarianApp = () => {
         onResetSession={handleResetSession}
         isGrouped={isGrouped}
         onToggleGroup={() => setIsGrouped(prev => !prev)}
+        sortConfig={sortConfig}
+        onSort={handleSort}
       />
 
       <ArticleDetail 

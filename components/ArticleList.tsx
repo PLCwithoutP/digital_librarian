@@ -13,16 +13,9 @@ interface ArticleListProps {
   onResetSession: () => void;
   isGrouped: boolean;
   onToggleGroup: () => void;
+  sortConfig: { key: string; direction: 'asc' | 'desc' } | null;
+  onSort: (key: string) => void;
 }
-
-const getTypeColor = (type: string | undefined) => {
-  const t = (type || '').toLowerCase();
-  if (t.includes('article')) return 'bg-blue-100 text-blue-800';
-  if (t.includes('report')) return 'bg-purple-100 text-purple-800';
-  if (t.includes('conf') || t.includes('proceeding')) return 'bg-orange-100 text-orange-800';
-  if (t.includes('book')) return 'bg-green-100 text-green-800';
-  return 'bg-slate-100 text-slate-800';
-};
 
 export const ArticleList: React.FC<ArticleListProps> = ({
   articles,
@@ -34,7 +27,9 @@ export const ArticleList: React.FC<ArticleListProps> = ({
   onImportSession,
   onResetSession,
   isGrouped,
-  onToggleGroup
+  onToggleGroup,
+  sortConfig,
+  onSort
 }) => {
 
   const groupedArticles = useMemo(() => {
@@ -57,7 +52,6 @@ export const ArticleList: React.FC<ArticleListProps> = ({
   }, [articles, isGrouped]);
 
   const renderRow = (article: Article) => {
-     const type = article.metadata?.type || 'Non-Deducted';
      return (
       <tr 
         key={article.id} 
@@ -82,13 +76,13 @@ export const ArticleList: React.FC<ArticleListProps> = ({
             {article.metadata?.year || '-'}
           </div>
         </td>
-        <td className="px-6 py-4">
-          <span className={`px-2 py-1 inline-flex text-xs leading-5 font-semibold rounded-full ${getTypeColor(type)}`}>
-            {type}
-          </span>
-        </td>
       </tr>
      );
+  };
+
+  const renderSortArrow = (key: string) => {
+      if (sortConfig?.key !== key) return <span className="text-slate-300 opacity-0 group-hover:opacity-50 ml-1 transition-opacity">↕</span>;
+      return <span className="text-indigo-600 ml-1">{sortConfig.direction === 'asc' ? '↑' : '↓'}</span>;
   };
 
   return (
@@ -166,16 +160,30 @@ export const ArticleList: React.FC<ArticleListProps> = ({
         <table className="min-w-full divide-y divide-slate-200">
           <thead className="bg-slate-50 sticky top-0 z-10 shadow-sm">
             <tr>
-              <th className="px-6 py-3 text-left text-xs font-semibold text-slate-500 uppercase tracking-wider w-1/2">Publication</th>
-              <th className="px-6 py-3 text-left text-xs font-semibold text-slate-500 uppercase tracking-wider">Authors</th>
-              <th className="px-6 py-3 text-left text-xs font-semibold text-slate-500 uppercase tracking-wider">Year</th>
-              <th className="px-6 py-3 text-left text-xs font-semibold text-slate-500 uppercase tracking-wider">Type</th>
+              <th 
+                className="px-6 py-3 text-left text-xs font-semibold text-slate-500 uppercase tracking-wider w-1/2 cursor-pointer hover:bg-slate-100 group select-none"
+                onClick={() => onSort('publication')}
+              >
+                Publication {renderSortArrow('publication')}
+              </th>
+              <th 
+                className="px-6 py-3 text-left text-xs font-semibold text-slate-500 uppercase tracking-wider cursor-pointer hover:bg-slate-100 group select-none"
+                onClick={() => onSort('authors')}
+              >
+                Authors {renderSortArrow('authors')}
+              </th>
+              <th 
+                className="px-6 py-3 text-left text-xs font-semibold text-slate-500 uppercase tracking-wider cursor-pointer hover:bg-slate-100 group select-none"
+                onClick={() => onSort('year')}
+              >
+                Year {renderSortArrow('year')}
+              </th>
             </tr>
           </thead>
           <tbody className="bg-white divide-y divide-slate-100">
             {articles.length === 0 ? (
               <tr>
-                <td colSpan={4} className="px-6 py-20 text-center text-slate-400 italic">
+                <td colSpan={3} className="px-6 py-20 text-center text-slate-400 italic">
                   No articles found.
                 </td>
               </tr>
@@ -183,7 +191,7 @@ export const ArticleList: React.FC<ArticleListProps> = ({
                 groupedArticles.map(([category, groupArticles]) => (
                     <React.Fragment key={category}>
                         <tr className="bg-slate-100">
-                            <td colSpan={4} className="px-6 py-2 text-xs font-bold uppercase tracking-wider text-slate-600">
+                            <td colSpan={3} className="px-6 py-2 text-xs font-bold uppercase tracking-wider text-slate-600">
                                 {category} ({groupArticles.length})
                             </td>
                         </tr>
