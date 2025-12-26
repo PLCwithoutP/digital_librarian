@@ -1,4 +1,3 @@
-
 import React from 'react';
 import { Source, Article } from '../types';
 
@@ -8,6 +7,7 @@ interface SidebarProps {
   activeSourceId: string | null;
   onSetActiveSource: (id: string | null) => void;
   onAddSource: (e: React.ChangeEvent<HTMLInputElement>) => void;
+  onAddPDF: (e: React.ChangeEvent<HTMLInputElement>) => void;
 }
 
 export const Sidebar: React.FC<SidebarProps> = ({
@@ -16,6 +16,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
   activeSourceId,
   onSetActiveSource,
   onAddSource,
+  onAddPDF,
 }) => {
   return (
     <aside className="w-64 bg-slate-900 text-slate-300 flex flex-col border-r border-slate-800 shrink-0">
@@ -54,7 +55,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
         ))}
       </nav>
 
-      <div className="p-4 border-t border-slate-800">
+      <div className="p-4 border-t border-slate-800 space-y-3">
         <label className="flex items-center justify-center gap-2 w-full bg-indigo-600 hover:bg-indigo-700 text-white font-medium py-2 rounded-lg cursor-pointer transition-colors shadow-lg">
           <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
             <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4v16m8-8H4" />
@@ -68,6 +69,20 @@ export const Sidebar: React.FC<SidebarProps> = ({
             // @ts-ignore
             webkitdirectory=""
             directory=""
+          />
+        </label>
+
+        <label className="flex items-center justify-center gap-2 w-full bg-slate-700 hover:bg-slate-600 text-white font-medium py-2 rounded-lg cursor-pointer transition-colors shadow-lg">
+          <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M7 21h10a2 2 0 002-2V9.414a1 1 0 00-.293-.707l-5.414-5.414A1 1 0 0012.586 3H7a2 2 0 00-2 2v14a2 2 0 002 2z" />
+          </svg>
+          Add PDF
+          <input 
+            type="file" 
+            className="hidden" 
+            onChange={onAddPDF}
+            accept=".pdf,.json"
+            multiple
           />
         </label>
       </div>

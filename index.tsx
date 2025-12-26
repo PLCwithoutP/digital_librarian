@@ -30,6 +30,89 @@ const LibrarianApp = () => {
     initSession();
   }, []);
 
+  const processMetadataFiles = async (files: File[]): Promise<Map<string, any>> => {
+      const jsonFiles = files.filter(f => f.name.toLowerCase().endsWith('.json'));
+      const pdfMetadataMap = new Map<string, any>();
+
+      for (const jsonFile of jsonFiles) {
+          try {
+              const text = await jsonFile.text();
+              const data = JSON.parse(text);
+              if (data.pdfs && Array.isArray(data.pdfs)) {
+                  data.pdfs.forEach((pdf: any) => {
+                      if (pdf.file_name) {
+                          pdfMetadataMap.set(pdf.file_name, pdf);
+                      }
+                  });
+              }
+          } catch (err) {
+              console.warn(`Failed to parse metadata file ${jsonFile.name}:`, err);
+          }
+      }
+      return pdfMetadataMap;
+  };
+
+  const createMetadata = (file: File, meta: any | undefined): ArticleMetadata => {
+      if (meta) {
+          // Extract keywords
+          let keywords: string[] = [];
+          if (meta.pdf_meta && meta.pdf_meta['/Keywords']) {
+             keywords = meta.pdf_meta['/Keywords'].split(/[;,]/)
+                .map((k: string) => k.trim())
+                .filter((k: string) => k);
+          } else if (Array.isArray(meta.keywords)) {
+             keywords = meta.keywords;
+          }
+
+          // Extract categories (Subject)
+          let categories: string[] = [];
+          if (meta.pdf_meta && meta.pdf_meta['/Subject']) {
+              const subj = meta.pdf_meta['/Subject'].trim();
+              if (subj) categories.push(subj);
+          }
+          if (categories.length === 0 && meta.categories && Array.isArray(meta.categories)) {
+              categories = meta.categories;
+          }
+          if (categories.length === 0) categories.push("Uncategorized");
+
+          // Extract Year
+          let year = "Unknown";
+          if (meta.year) {
+              year = String(meta.year);
+          } else if (meta.pdf_meta && meta.pdf_meta['/CreationDate']) {
+              const match = meta.pdf_meta['/CreationDate'].match(/D:(\d{4})/);
+              if (match) year = match[1];
+          }
+
+          // Extract Authors
+          let authors: string[] = [];
+          if (Array.isArray(meta.authors)) {
+              authors = meta.authors;
+          } else if (meta.pdf_meta && meta.pdf_meta['/Author']) {
+              authors = [meta.pdf_meta['/Author']];
+          }
+          if (authors.length === 0) authors = ["Unknown Author"];
+          
+          return {
+              title: meta.title || meta.pdf_meta?.['/Title'] || file.name.replace(/\.pdf$/i, ''),
+              authors: authors,
+              year: year,
+              abstract: meta.abstract || "",
+              keywords: keywords,
+              categories: categories
+          };
+      } else {
+          return {
+              title: file.name.replace(/\.pdf$/i, ''),
+              authors: ["Unknown"],
+              year: "Unknown",
+              categories: ["Uncategorized"],
+              keywords: [],
+              abstract: ""
+          };
+      }
+  };
+
   const handleAddSource = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const files = e.target.files;
     if (!files || files.length === 0) return;
@@ -67,87 +150,15 @@ const LibrarianApp = () => {
     setSources(prev => [...prev, newSource]);
     await saveSourceToDB(newSource);
 
-    // 3. Process Metadata JSON files first
     const fileList: File[] = Array.from(files);
-    const jsonFiles = fileList.filter(f => f.name.toLowerCase().endsWith('.json'));
-    const pdfMetadataMap = new Map<string, any>();
-
-    for (const jsonFile of jsonFiles) {
-        try {
-            const text = await jsonFile.text();
-            const data = JSON.parse(text);
-            if (data.pdfs && Array.isArray(data.pdfs)) {
-                data.pdfs.forEach((pdf: any) => {
-                    if (pdf.file_name) {
-                        pdfMetadataMap.set(pdf.file_name, pdf);
-                    }
-                });
-            }
-        } catch (err) {
-            console.warn(`Failed to parse metadata file ${jsonFile.name}:`, err);
-        }
-    }
-
+    const pdfMetadataMap = await processMetadataFiles(fileList);
     const newArticles: Article[] = [];
     
     for (const file of fileList) {
       if (file.type !== 'application/pdf' && !file.name.toLowerCase().endsWith('.pdf')) continue;
 
       const meta = pdfMetadataMap.get(file.name);
-      let articleMetadata: ArticleMetadata | undefined = undefined;
-
-      if (meta) {
-          // Extract keywords
-          let keywords: string[] = [];
-          if (meta.pdf_meta && meta.pdf_meta['/Keywords']) {
-             // Keywords in PDF metadata are often separated by ; or ,
-             keywords = meta.pdf_meta['/Keywords'].split(/[;,]/)
-                .map((k: string) => k.trim())
-                .filter((k: string) => k);
-          } else if (Array.isArray(meta.keywords)) {
-             keywords = meta.keywords;
-          }
-
-          // Extract categories (Subject)
-          let categories: string[] = [];
-          if (meta.pdf_meta && meta.pdf_meta['/Subject']) {
-              const subj = meta.pdf_meta['/Subject'].trim();
-              // Heuristic: if subject is reasonably short, treat as category. 
-              if (subj) categories.push(subj);
-          }
-          if (categories.length === 0 && meta.categories && Array.isArray(meta.categories)) {
-              categories = meta.categories;
-          }
-          if (categories.length === 0) categories.push("Uncategorized");
-
-          // Extract Year
-          let year = "Unknown";
-          if (meta.year) {
-              year = String(meta.year);
-          } else if (meta.pdf_meta && meta.pdf_meta['/CreationDate']) {
-              // Format D:YYYYMMDD...
-              const match = meta.pdf_meta['/CreationDate'].match(/D:(\d{4})/);
-              if (match) year = match[1];
-          }
-
-          // Extract Authors
-          let authors: string[] = [];
-          if (Array.isArray(meta.authors)) {
-              authors = meta.authors;
-          } else if (meta.pdf_meta && meta.pdf_meta['/Author']) {
-              authors = [meta.pdf_meta['/Author']];
-          }
-          if (authors.length === 0) authors = ["Unknown Author"];
-          
-          articleMetadata = {
-              title: meta.title || meta.pdf_meta?.['/Title'] || file.name.replace('.pdf', ''),
-              authors: authors,
-              year: year,
-              abstract: meta.abstract || "",
-              keywords: keywords,
-              categories: categories
-          };
-      }
+      const articleMetadata = createMetadata(file, meta);
 
       const articleId = crypto.randomUUID();
       const article: Article = {
@@ -167,6 +178,53 @@ const LibrarianApp = () => {
 
     setArticles(prev => [...prev, ...newArticles]);
     if (e.target) e.target.value = ""; // Reset input
+  };
+
+  const handleAddPDF = async (e: React.ChangeEvent<HTMLInputElement>) => {
+      const files = e.target.files;
+      if (!files || files.length === 0) return;
+
+      // Find or create "Uploaded Files" source
+      let uploadSource = sources.find(s => s.name === "Uploaded Files");
+      let sourceId = uploadSource?.id;
+
+      if (!uploadSource) {
+          sourceId = crypto.randomUUID();
+          uploadSource = { id: sourceId, name: "Uploaded Files" };
+          setSources(prev => [...prev, uploadSource!]);
+          await saveSourceToDB(uploadSource);
+      } else {
+          sourceId = uploadSource.id;
+      }
+
+      const fileList: File[] = Array.from(files);
+      const pdfMetadataMap = await processMetadataFiles(fileList);
+      const newArticles: Article[] = [];
+
+      for (const file of fileList) {
+          if (file.type !== 'application/pdf' && !file.name.toLowerCase().endsWith('.pdf')) continue;
+
+          const meta = pdfMetadataMap.get(file.name);
+          const articleMetadata = createMetadata(file, meta);
+
+          const articleId = crypto.randomUUID();
+          const article: Article = {
+              id: articleId,
+              sourceId: sourceId!,
+              fileName: file.name,
+              fileSize: file.size,
+              addedAt: Date.now(),
+              status: 'completed',
+              metadata: articleMetadata
+          };
+
+          newArticles.push(article);
+          await saveFileToDB(articleId, file);
+          await saveArticleToDB(article);
+      }
+
+      setArticles(prev => [...prev, ...newArticles]);
+      if (e.target) e.target.value = "";
   };
 
   const handleUpdateArticle = async (id: string, updates: Partial<ArticleMetadata>) => {
@@ -336,6 +394,7 @@ const LibrarianApp = () => {
         activeSourceId={activeSourceId}
         onSetActiveSource={setActiveSourceId}
         onAddSource={handleAddSource}
+        onAddPDF={handleAddPDF}
       />
 
       <ArticleList 
