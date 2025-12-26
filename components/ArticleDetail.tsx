@@ -11,6 +11,7 @@ interface ArticleDetailProps {
   onUpdateMetadata: (id: string, updates: Partial<ArticleMetadata>) => void;
   onEditNote: (note: Note) => void;
   onOpenNote: (note: Note) => void;
+  onDeleteNote: (id: string) => void;
 }
 
 export const ArticleDetail: React.FC<ArticleDetailProps> = ({ 
@@ -19,7 +20,8 @@ export const ArticleDetail: React.FC<ArticleDetailProps> = ({
   onClose, 
   onUpdateMetadata,
   onEditNote,
-  onOpenNote
+  onOpenNote,
+  onDeleteNote
 }) => {
   const [newKeyword, setNewKeyword] = useState('');
   const [newCategory, setNewCategory] = useState('');
@@ -97,6 +99,12 @@ export const ArticleDetail: React.FC<ArticleDetailProps> = ({
       const newAuthors = authorsInput.split(',').map(s => s.trim()).filter(s => s.length > 0);
       onUpdateMetadata(article.id, { authors: newAuthors.length > 0 ? newAuthors : ["Unknown"] });
       setIsEditingAuthors(false);
+  };
+
+  const handleDeleteNoteClick = (id: string) => {
+      if(window.confirm("Are you sure you want to delete this note?")) {
+          onDeleteNote(id);
+      }
   };
 
   return (
@@ -269,15 +277,26 @@ export const ArticleDetail: React.FC<ArticleDetailProps> = ({
                                         <span className="text-xs font-bold text-amber-800 dark:text-amber-500 uppercase">{note.title}</span>
                                         <span className="text-[10px] text-amber-600 dark:text-amber-600">{new Date(note.createdAt).toLocaleDateString()}</span>
                                     </div>
-                                    <button 
-                                        onClick={() => onEditNote(note)}
-                                        className="opacity-0 group-hover:opacity-100 p-1 text-amber-600 hover:text-amber-800 dark:text-amber-500 dark:hover:text-amber-300 transition-opacity bg-amber-100 dark:bg-amber-900/50 rounded"
-                                        title="Edit Note"
-                                    >
-                                        <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15.232 5.232l3.536 3.536m-2.036-5.036a2.5 2.5 0 113.536 3.536L6.5 21.036H3v-3.572L16.732 3.732z" />
-                                        </svg>
-                                    </button>
+                                    <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
+                                        <button 
+                                            onClick={() => onEditNote(note)}
+                                            className="p-1 text-amber-600 hover:text-amber-800 dark:text-amber-500 dark:hover:text-amber-300 bg-amber-100 dark:bg-amber-900/50 rounded"
+                                            title="Edit Note"
+                                        >
+                                            <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15.232 5.232l3.536 3.536m-2.036-5.036a2.5 2.5 0 113.536 3.536L6.5 21.036H3v-3.572L16.732 3.732z" />
+                                            </svg>
+                                        </button>
+                                        <button 
+                                            onClick={() => handleDeleteNoteClick(note.id)}
+                                            className="p-1 text-red-600 hover:text-red-800 dark:text-red-500 dark:hover:text-red-300 bg-red-100 dark:bg-red-900/30 rounded"
+                                            title="Delete Note"
+                                        >
+                                            <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
+                                            </svg>
+                                        </button>
+                                    </div>
                                 </div>
                                 <div className="prose prose-sm dark:prose-invert prose-amber max-w-none text-slate-800 dark:text-slate-200">
                                     <ReactMarkdown>{note.content.replace(/\n/g, '  \n')}</ReactMarkdown>

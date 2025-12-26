@@ -8,10 +8,11 @@ interface SidebarProps {
   notes?: Note[];
   activeSourceId: string | null;
   onSetActiveSource: (id: string | null) => void;
-  onAddSource: (e: React.ChangeEvent<HTMLInputElement>) => void;
-  onAddPDF: (e: React.ChangeEvent<HTMLInputElement>) => void;
+  onOpenAddModal: () => void;
+  onOpenGenerateModal: () => void;
   onOpenSettings: () => void;
   onOpenNote: (note: Note) => void;
+  isGenerateDisabled: boolean;
 }
 
 export const Sidebar: React.FC<SidebarProps> = ({
@@ -20,10 +21,11 @@ export const Sidebar: React.FC<SidebarProps> = ({
   notes = [],
   activeSourceId,
   onSetActiveSource,
-  onAddSource,
-  onAddPDF,
+  onOpenAddModal,
+  onOpenGenerateModal,
   onOpenSettings,
   onOpenNote,
+  isGenerateDisabled
 }) => {
   // Filter notes that should appear in Sidebar (General and Category)
   const sidebarNotes = notes.filter(n => n.type !== 'article');
@@ -89,37 +91,34 @@ export const Sidebar: React.FC<SidebarProps> = ({
       </nav>
 
       <div className="p-4 border-t border-slate-800 space-y-3">
-        <label className="flex items-center justify-center gap-2 w-full bg-indigo-600 hover:bg-indigo-700 text-white font-medium py-2 rounded-lg cursor-pointer transition-colors shadow-lg">
+        
+        <button 
+          onClick={onOpenAddModal}
+          className="flex items-center justify-center gap-2 w-full bg-indigo-600 hover:bg-indigo-700 text-white font-medium py-2 rounded-lg cursor-pointer transition-colors shadow-lg"
+        >
           <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
             <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4v16m8-8H4" />
           </svg>
-          Add Folder
-          <input 
-            type="file" 
-            className="hidden" 
-            onChange={onAddSource}
-            multiple
-            // @ts-ignore
-            webkitdirectory=""
-            directory=""
-          />
-        </label>
+          Add
+        </button>
 
-        <label className="flex items-center justify-center gap-2 w-full bg-slate-700 hover:bg-slate-600 text-white font-medium py-2 rounded-lg cursor-pointer transition-colors shadow-lg">
+        <button 
+          onClick={onOpenGenerateModal}
+          disabled={isGenerateDisabled}
+          className={`flex items-center justify-center gap-2 w-full font-medium py-2 rounded-lg cursor-pointer transition-colors shadow-lg ${
+              isGenerateDisabled 
+              ? 'bg-slate-800 text-slate-600 cursor-not-allowed' 
+              : 'bg-emerald-600 hover:bg-emerald-700 text-white'
+          }`}
+          title={isGenerateDisabled ? "Select articles to generate output" : "Generate output"}
+        >
           <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M7 21h10a2 2 0 002-2V9.414a1 1 0 00-.293-.707l-5.414-5.414A1 1 0 0012.586 3H7a2 2 0 00-2 2v14a2 2 0 002 2z" />
+            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 10V3L4 14h7v7l9-11h-7z" />
           </svg>
-          Add PDF
-          <input 
-            type="file" 
-            className="hidden" 
-            onChange={onAddPDF}
-            accept=".pdf,.json"
-            multiple
-          />
-        </label>
+          Generate
+        </button>
 
-        <div className="grid grid-cols-1 gap-2">
+        <div className="grid grid-cols-1 gap-2 pt-2 border-t border-slate-700/50">
             <button 
               onClick={onOpenSettings}
               className="flex items-center justify-center gap-2 w-full bg-slate-800 hover:bg-slate-700 text-slate-300 hover:text-white font-medium py-2 rounded-lg transition-colors border border-slate-700"

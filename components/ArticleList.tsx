@@ -6,6 +6,9 @@ interface ArticleListProps {
   articles: Article[];
   selectedArticleId: string | null;
   onSelectArticle: (id: string) => void;
+  checkedArticleIds: Set<string>;
+  onToggleArticle: (id: string) => void;
+  onToggleAll: (ids: string[]) => void;
   searchQuery: string;
   onSearchChange: (query: string) => void;
   onSaveSession: () => void;
@@ -46,6 +49,9 @@ export const ArticleList: React.FC<ArticleListProps> = ({
   articles,
   selectedArticleId,
   onSelectArticle,
+  checkedArticleIds,
+  onToggleArticle,
+  onToggleAll,
   searchQuery,
   onSearchChange,
   onSaveSession,
@@ -76,6 +82,16 @@ export const ArticleList: React.FC<ArticleListProps> = ({
     return Object.entries(groups).sort((a, b) => a[0].localeCompare(b[0]));
   }, [articles, isGrouped]);
 
+  const areAllSelected = articles.length > 0 && articles.every(a => checkedArticleIds.has(a.id));
+
+  const handleToggleAll = () => {
+      if (areAllSelected) {
+          onToggleAll([]); // Deselect all visible
+      } else {
+          onToggleAll(articles.map(a => a.id)); // Select all visible
+      }
+  };
+
   const renderRow = (article: Article) => {
      return (
       <tr 
@@ -83,6 +99,14 @@ export const ArticleList: React.FC<ArticleListProps> = ({
         onClick={() => onSelectArticle(article.id)}
         className={`hover:bg-indigo-50 dark:hover:bg-slate-800 cursor-pointer transition-colors border-b border-slate-100 dark:border-slate-800 last:border-0 ${selectedArticleId === article.id ? 'bg-indigo-50 dark:bg-slate-800 border-l-4 border-l-indigo-500' : 'bg-white dark:bg-slate-900'}`}
       >
+        <td className="pl-6 py-4 w-10" onClick={(e) => e.stopPropagation()}>
+            <input 
+                type="checkbox"
+                className="w-4 h-4 rounded border-slate-300 text-indigo-600 focus:ring-indigo-500 cursor-pointer"
+                checked={checkedArticleIds.has(article.id)}
+                onChange={() => onToggleArticle(article.id)}
+            />
+        </td>
         <td className="px-6 py-4">
           <div className="flex flex-col gap-1.5">
             <div className="text-sm font-semibold text-slate-900 dark:text-slate-100 line-clamp-2">
@@ -200,6 +224,14 @@ export const ArticleList: React.FC<ArticleListProps> = ({
         <table className="min-w-full divide-y divide-slate-200 dark:divide-slate-800">
           <thead className="bg-slate-50 dark:bg-slate-900 sticky top-0 z-10 shadow-sm">
             <tr>
+              <th className="pl-6 py-3 w-10">
+                  <input 
+                      type="checkbox"
+                      className="w-4 h-4 rounded border-slate-300 text-indigo-600 focus:ring-indigo-500 cursor-pointer"
+                      checked={areAllSelected}
+                      onChange={handleToggleAll}
+                  />
+              </th>
               <th 
                 className="px-6 py-3 text-left text-xs font-semibold text-slate-500 dark:text-slate-400 uppercase tracking-wider w-1/2 cursor-pointer hover:bg-slate-100 dark:hover:bg-slate-800 group select-none"
                 onClick={() => onSort('publication')}
@@ -223,7 +255,7 @@ export const ArticleList: React.FC<ArticleListProps> = ({
           <tbody className="bg-white dark:bg-slate-900 divide-y divide-slate-100 dark:divide-slate-800">
             {articles.length === 0 ? (
               <tr>
-                <td colSpan={3} className="px-6 py-20 text-center text-slate-400 dark:text-slate-500 italic">
+                <td colSpan={4} className="px-6 py-20 text-center text-slate-400 dark:text-slate-500 italic">
                   No articles found.
                 </td>
               </tr>
@@ -231,7 +263,7 @@ export const ArticleList: React.FC<ArticleListProps> = ({
                 groupedArticles.map(([category, groupArticles]) => (
                     <React.Fragment key={category}>
                         <tr className="bg-slate-100 dark:bg-slate-800">
-                            <td colSpan={3} className="px-6 py-2 text-xs font-bold uppercase tracking-wider text-slate-600 dark:text-slate-300">
+                            <td colSpan={4} className="px-6 py-2 text-xs font-bold uppercase tracking-wider text-slate-600 dark:text-slate-300">
                                 {category} ({groupArticles.length})
                             </td>
                         </tr>

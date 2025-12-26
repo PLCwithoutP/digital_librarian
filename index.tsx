@@ -10,6 +10,8 @@ import { SettingsModal, ThemeOption } from './components/SettingsModal';
 import { NotebookModal } from './components/NotebookModal';
 import { NoteViewerModal } from './components/NoteViewerModal';
 import { NotebookEditor } from './components/NotebookEditor';
+import { AddSourceModal } from './components/AddSourceModal';
+import { GenerateModal } from './components/GenerateModal';
 
 const LibrarianApp = () => {
   const [sources, setSources] = useState<Source[]>([]);
@@ -20,6 +22,7 @@ const LibrarianApp = () => {
   const [activeSourceId, setActiveSourceId] = useState<string | null>(null);
   const [isGrouped, setIsGrouped] = useState(false);
   const [sortConfig, setSortConfig] = useState<{ key: string; direction: 'asc' | 'desc' } | null>(null);
+  const [checkedArticleIds, setCheckedArticleIds] = useState<Set<string>>(new Set());
   
   // Settings & Theme
   const [isSettingsOpen, setIsSettingsOpen] = useState(false);
@@ -30,6 +33,10 @@ const LibrarianApp = () => {
   const [selectedNote, setSelectedNote] = useState<Note | null>(null);
   const [activeEditorNote, setActiveEditorNote] = useState<Partial<Note> | null>(null);
   const [isEditingNote, setIsEditingNote] = useState(false);
+
+  // New Modals State
+  const [isAddSourceModalOpen, setIsAddSourceModalOpen] = useState(false);
+  const [isGenerateModalOpen, setIsGenerateModalOpen] = useState(false);
 
   // Initialize theme
   useEffect(() => {
@@ -144,7 +151,8 @@ const LibrarianApp = () => {
               year: year,
               abstract: meta.abstract || "",
               keywords: keywords,
-              categories: categories
+              categories: categories,
+              bibtex: meta.bibtex || "" 
           };
       } else {
           return {
@@ -153,7 +161,8 @@ const LibrarianApp = () => {
               year: "Unknown",
               categories: ["Uncategorized"],
               keywords: [],
-              abstract: ""
+              abstract: "",
+              bibtex: ""
           };
       }
   };
@@ -183,6 +192,14 @@ const LibrarianApp = () => {
       // Update State (Remove old)
       setSources(prev => prev.filter(s => s.id !== existingSource.id));
       setArticles(prev => prev.filter(a => a.sourceId !== existingSource.id));
+      
+      // Clear checked articles that were deleted
+      const deletedIds = new Set(articlesToDelete.map(a => a.id));
+      setCheckedArticleIds(prev => {
+          const next = new Set(prev);
+          deletedIds.forEach(id => next.delete(id));
+          return next;
+      });
 
       // Reset selection if needed
       if (activeSourceId === existingSource.id) setActiveSourceId(null);
@@ -270,6 +287,127 @@ const LibrarianApp = () => {
 
       setArticles(prev => [...prev, ...newArticles]);
       if (e.target) e.target.value = "";
+  };
+
+  const handleGenerateConfirm = (options: { 
+      references: boolean; 
+      notes: boolean; 
+      notesOptions: { general: boolean; category: boolean; article: boolean };
+      format?: string 
+  }) => {
+    
+    const selectedArticles = articles.filter(a => checkedArticleIds.has(a.id));
+
+    // 1. Generate References
+    if (options.references) {
+        const bibtexContent = selectedArticles
+            .map(a => a.metadata?.bibtex || "")
+            .filter(b => b.trim().length > 0)
+            .join('\n\n');
+        
+        if (bibtexContent) {
+            const blob = new Blob([bibtexContent], { type: 'text/plain' });
+            const url = URL.createObjectURL(blob);
+            const a = document.createElement('a');
+            a.href = url;
+            a.download = 'references_1.bib';
+            a.click();
+            URL.revokeObjectURL(url);
+        } else {
+            alert("No BibTeX data found for selected articles.");
+        }
+    }
+
+    // 2. Generate Notes
+    if (options.notes) {
+        let content = '';
+        const generalNotes = options.notesOptions.general ? notes.filter(n => n.type === 'general') : [];
+        const categoryNotes = options.notesOptions.category ? notes.filter(n => n.type === 'category') : [];
+        const articleNotes = options.notesOptions.article ? notes.filter(n => n.type === 'article' && n.targetId && checkedArticleIds.has(n.targetId)) : [];
+        
+        // --- TXT or DAT Format ---
+        if (options.format === '.txt' || options.format === '.dat') {
+            if (generalNotes.length > 0) {
+                content += "# General Notes\n\n";
+                generalNotes.forEach(n => {
+                    content += `## ${n.title}\n${n.content}\n\n`;
+                });
+            }
+            if (categoryNotes.length > 0) {
+                content += "# Category Notes\n\n";
+                // Group by category
+                const catGroups: Record<string, Note[]> = {};
+                categoryNotes.forEach(n => {
+                    if (n.targetId) {
+                        if (!catGroups[n.targetId]) catGroups[n.targetId] = [];
+                        catGroups[n.targetId].push(n);
+                    }
+                });
+                Object.entries(catGroups).forEach(([cat, ns]) => {
+                    content += `### ${cat}\n`;
+                    ns.forEach(n => content += `#### ${n.title}\n${n.content}\n\n`);
+                });
+            }
+            if (articleNotes.length > 0) {
+                content += "# Article-specific Notes\n\n";
+                articleNotes.forEach(n => {
+                    const art = articles.find(a => a.id === n.targetId);
+                    const artTitle = art?.metadata?.title || art?.fileName || "Unknown Article";
+                    content += `## ${n.title}\nThis subsection belongs to ${artTitle}.\n\n${n.content}\n\n`;
+                });
+            }
+        } 
+        // --- TeX Format ---
+        else if (options.format === '.tex') {
+            content += `\\documentclass{article}\n\\title{Notes of Librarian}\n\\begin{document}\n\\maketitle\n\n`;
+            
+            if (generalNotes.length > 0) {
+                content += `\\section{General Notes}\n`;
+                generalNotes.forEach(n => {
+                    content += `\\subsection{${n.title}}\n${n.content}\n\n`;
+                });
+            }
+
+            if (categoryNotes.length > 0) {
+                content += `\\section{Category Notes}\n`;
+                const catGroups: Record<string, Note[]> = {};
+                categoryNotes.forEach(n => {
+                    if (n.targetId) {
+                        if (!catGroups[n.targetId]) catGroups[n.targetId] = [];
+                        catGroups[n.targetId].push(n);
+                    }
+                });
+                Object.entries(catGroups).forEach(([cat, ns]) => {
+                    content += `\\subsection{${cat}}\n`;
+                    ns.forEach(n => content += `\\subsubsection{${n.title}}\n${n.content}\n\n`);
+                });
+            }
+
+            if (articleNotes.length > 0) {
+                content += `\\section{Article-specific Notes}\n`;
+                articleNotes.forEach(n => {
+                    const art = articles.find(a => a.id === n.targetId);
+                    const artTitle = art?.metadata?.title || art?.fileName || "Unknown Article";
+                    content += `\\subsection{${n.title}}\nThis subsection belongs to ${artTitle}.\n\n${n.content}\n\n`;
+                });
+            }
+
+            content += `\\end{document}`;
+        }
+
+        if (content) {
+            const blob = new Blob([content], { type: 'text/plain' });
+            const url = URL.createObjectURL(blob);
+            const a = document.createElement('a');
+            a.href = url;
+            a.download = `notes${options.format}`;
+            a.click();
+            URL.revokeObjectURL(url);
+        } else {
+            // Only alert if notes were selected but none found
+            // alert("No relevant notes found to generate.");
+        }
+    }
   };
 
   const handleUpdateArticle = async (id: string, updates: Partial<ArticleMetadata>) => {
@@ -402,6 +540,7 @@ const LibrarianApp = () => {
         setSearchQuery('');
         setIsGrouped(false);
         setSortConfig(null);
+        setCheckedArticleIds(new Set());
       } catch (err) {
         console.error("Delete all articles failed", err);
         alert("Failed to delete articles.");
@@ -441,6 +580,7 @@ const LibrarianApp = () => {
         setSearchQuery('');
         setIsGrouped(false);
         setSortConfig(null);
+        setCheckedArticleIds(new Set());
       } catch (err) {
         console.error("Import session failed", err);
         alert("Failed to import session. The file might be corrupted.");
@@ -512,6 +652,19 @@ const LibrarianApp = () => {
     return [...list]; // Return new array reference
   }, [articles, activeSourceId, searchQuery, sortConfig]);
 
+  const handleToggleArticle = (id: string) => {
+      setCheckedArticleIds(prev => {
+          const next = new Set(prev);
+          if (next.has(id)) next.delete(id);
+          else next.add(id);
+          return next;
+      });
+  };
+
+  const handleToggleAll = (ids: string[]) => {
+      setCheckedArticleIds(new Set(ids));
+  };
+
   const allCategories = useMemo(() => {
       const cats = new Set<string>();
       articles.forEach(a => a.metadata?.categories.forEach(c => cats.add(c)));
@@ -528,16 +681,20 @@ const LibrarianApp = () => {
         notes={notes}
         activeSourceId={activeSourceId}
         onSetActiveSource={setActiveSourceId}
-        onAddSource={handleAddSource}
-        onAddPDF={handleAddPDF}
+        onOpenAddModal={() => setIsAddSourceModalOpen(true)}
+        onOpenGenerateModal={() => setIsGenerateModalOpen(true)}
         onOpenSettings={() => setIsSettingsOpen(true)}
         onOpenNote={(note) => setSelectedNote(note)}
+        isGenerateDisabled={checkedArticleIds.size === 0}
       />
 
       <ArticleList 
         articles={filteredArticles}
         selectedArticleId={selectedArticleId}
         onSelectArticle={setSelectedArticleId}
+        checkedArticleIds={checkedArticleIds}
+        onToggleArticle={handleToggleArticle}
+        onToggleAll={handleToggleAll}
         searchQuery={searchQuery}
         onSearchChange={setSearchQuery}
         onSaveSession={handleSaveSession}
@@ -556,6 +713,7 @@ const LibrarianApp = () => {
         onUpdateMetadata={handleUpdateArticle}
         onEditNote={handleEditNote}
         onOpenNote={(note) => setSelectedNote(note)}
+        onDeleteNote={handleDeleteNote}
       />
 
       {/* Floating Action Button for Notebook */}
@@ -582,6 +740,19 @@ const LibrarianApp = () => {
         articles={articles}
         categories={allCategories}
         onConfirm={handleSetupNote}
+      />
+
+      <AddSourceModal 
+        isOpen={isAddSourceModalOpen}
+        onClose={() => setIsAddSourceModalOpen(false)}
+        onAddSource={handleAddSource}
+        onAddPDF={handleAddPDF}
+      />
+
+      <GenerateModal 
+        isOpen={isGenerateModalOpen}
+        onClose={() => setIsGenerateModalOpen(false)}
+        onConfirm={handleGenerateConfirm}
       />
 
       {activeEditorNote && (
