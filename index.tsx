@@ -359,12 +359,18 @@ const LibrarianApp = () => {
         } 
         // --- TeX Format ---
         else if (options.format === '.tex') {
-            content += `\\documentclass{article}\n\\title{Notes of Librarian}\n\\begin{document}\n\\maketitle\n\n`;
+            const formatTexContent = (text: string) => {
+                // Wrap words containing _ or ^ in $...$
+                // Ex: x_j -> $x_j$
+                return text.replace(/([a-zA-Z0-9\\{}[\]()+\-=/*]*[_\^][a-zA-Z0-9\\{}[\]()+\-=/*]*)/g, "$$$1$$");
+            };
+
+            content += `\\documentclass{article}\n\\usepackage{amsmath}\n\\title{Notes of Librarian}\n\\begin{document}\n\\maketitle\n\n`;
             
             if (generalNotes.length > 0) {
                 content += `\\section{General Notes}\n`;
                 generalNotes.forEach(n => {
-                    content += `\\subsection{${n.title}}\n${n.content}\n\n`;
+                    content += `\\subsection{${n.title}}\n${formatTexContent(n.content)}\n\n`;
                 });
             }
 
@@ -379,7 +385,7 @@ const LibrarianApp = () => {
                 });
                 Object.entries(catGroups).forEach(([cat, ns]) => {
                     content += `\\subsection{${cat}}\n`;
-                    ns.forEach(n => content += `\\subsubsection{${n.title}}\n${n.content}\n\n`);
+                    ns.forEach(n => content += `\\subsubsection{${n.title}}\n${formatTexContent(n.content)}\n\n`);
                 });
             }
 
@@ -388,7 +394,7 @@ const LibrarianApp = () => {
                 articleNotes.forEach(n => {
                     const art = articles.find(a => a.id === n.targetId);
                     const artTitle = art?.metadata?.title || art?.fileName || "Unknown Article";
-                    content += `\\subsection{${n.title}}\nThis subsection belongs to ${artTitle}.\n\n${n.content}\n\n`;
+                    content += `\\subsection{${n.title}}\nThis subsection belongs to \\textit{${artTitle}}.\n\n${formatTexContent(n.content)}\n\n`;
                 });
             }
 
