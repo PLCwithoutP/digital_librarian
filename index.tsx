@@ -3,7 +3,6 @@ import React, { useState, useEffect, useMemo, Suspense } from 'react';
 import { createRoot } from 'react-dom/client';
 import { Article, Source } from './types';
 import { getAllData, saveArticleToDB, saveFileToDB, saveSourceToDB, getFileFromDB } from './db';
-import { parsePdfWithPython, initPyodide } from './backend/service';
 import { Sidebar } from './components/Sidebar';
 import { ArticleList } from './components/ArticleList';
 import { ArticleDetail } from './components/ArticleDetail';
@@ -13,14 +12,7 @@ const LibrarianApp = () => {
   const [articles, setArticles] = useState<Article[]>([]);
   const [selectedArticleId, setSelectedArticleId] = useState<string | null>(null);
   const [searchQuery, setSearchQuery] = useState('');
-  const [isProcessing, setIsProcessing] = useState(false);
   const [activeSourceId, setActiveSourceId] = useState<string | null>(null);
-  const [isPythonReady, setIsPythonReady] = useState(false);
-
-  // Initialize Pyodide
-  useEffect(() => {
-    initPyodide().then(() => setIsPythonReady(true)).catch(console.error);
-  }, []);
 
   // Load data on mount
   useEffect(() => {
@@ -40,12 +32,6 @@ const LibrarianApp = () => {
     const files = e.target.files;
     if (!files || files.length === 0) return;
 
-    if (!isPythonReady) {
-        alert("Python runtime is still initializing. Please wait a moment.");
-        return;
-    }
-
-    setIsProcessing(true);
     const sourceId = crypto.randomUUID();
     const firstFile = files[0] as any;
     const sourceName = firstFile.webkitRelativePath?.split('/')[0] || `Source ${sources.length + 1}`;
@@ -67,7 +53,7 @@ const LibrarianApp = () => {
         fileName: file.name,
         fileSize: file.size,
         addedAt: Date.now(),
-        status: 'pending'
+        status: 'completed' // Marked as completed immediately, metadata will be empty for now
       };
       
       newArticles.push(article);
@@ -77,28 +63,6 @@ const LibrarianApp = () => {
 
     setArticles(prev => [...prev, ...newArticles]);
     if (e.target) e.target.value = ""; // Reset input
-
-    // Process metadata using Python
-    for (const article of newArticles) {
-      const blob = await getFileFromDB(article.id);
-      if (blob) {
-        setArticles(prev => prev.map(a => a.id === article.id ? { ...a, status: 'processing' } : a));
-        try {
-          const metadata = await parsePdfWithPython(blob, article.fileName);
-          const updatedArticle: Article = { ...article, metadata, status: 'completed' };
-          
-          setArticles(prev => prev.map(a => a.id === article.id ? updatedArticle : a));
-          saveArticleToDB(updatedArticle);
-        } catch (e) {
-          console.error(`Failed to process ${article.fileName}`, e);
-          const errorArticle: Article = { ...article, status: 'error' };
-          setArticles(prev => prev.map(a => a.id === article.id ? errorArticle : a));
-          saveArticleToDB(errorArticle);
-        }
-      }
-    }
-
-    setIsProcessing(false);
   };
 
   const filteredArticles = useMemo(() => {
@@ -134,7 +98,6 @@ const LibrarianApp = () => {
         activeSourceId={activeSourceId}
         onSetActiveSource={setActiveSourceId}
         onAddSource={handleAddSource}
-        isProcessing={isProcessing}
       />
 
       <ArticleList 
