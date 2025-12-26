@@ -6,6 +6,7 @@ export interface ArticleMetadata {
   categories: string[];
   keywords: string[];
   abstract: string;
+  type?: string;
 }
 
 export interface Article {

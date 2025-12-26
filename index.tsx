@@ -135,6 +135,12 @@ const LibrarianApp = () => {
               authors = [meta.pdf_meta['/Author']];
           }
           if (authors.length === 0) authors = ["Unknown Author"];
+          
+          // Extract Type
+          let type = "Non-Deducted";
+          if (meta.type) {
+              type = meta.type;
+          }
 
           articleMetadata = {
               title: meta.title || meta.pdf_meta?.['/Title'] || file.name.replace('.pdf', ''),
@@ -142,7 +148,8 @@ const LibrarianApp = () => {
               year: year,
               abstract: meta.abstract || "",
               keywords: keywords,
-              categories: categories
+              categories: categories,
+              type: type
           };
       }
 

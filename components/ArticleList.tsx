@@ -13,6 +13,15 @@ interface ArticleListProps {
   onResetSession: () => void;
 }
 
+const getTypeColor = (type: string | undefined) => {
+  const t = (type || '').toLowerCase();
+  if (t.includes('article')) return 'bg-blue-100 text-blue-800';
+  if (t.includes('report')) return 'bg-purple-100 text-purple-800';
+  if (t.includes('conf') || t.includes('proceeding')) return 'bg-orange-100 text-orange-800';
+  if (t.includes('book')) return 'bg-green-100 text-green-800';
+  return 'bg-slate-100 text-slate-800';
+};
+
 export const ArticleList: React.FC<ArticleListProps> = ({
   articles,
   selectedArticleId,
@@ -81,10 +90,10 @@ export const ArticleList: React.FC<ArticleListProps> = ({
         <table className="min-w-full divide-y divide-slate-200">
           <thead className="bg-slate-50 sticky top-0 z-10 shadow-sm">
             <tr>
-              <th className="px-6 py-3 text-left text-xs font-semibold text-slate-500 uppercase tracking-wider w-1/2">Article</th>
+              <th className="px-6 py-3 text-left text-xs font-semibold text-slate-500 uppercase tracking-wider w-1/2">Publication</th>
               <th className="px-6 py-3 text-left text-xs font-semibold text-slate-500 uppercase tracking-wider">Authors</th>
               <th className="px-6 py-3 text-left text-xs font-semibold text-slate-500 uppercase tracking-wider">Year</th>
-              <th className="px-6 py-3 text-left text-xs font-semibold text-slate-500 uppercase tracking-wider">Status</th>
+              <th className="px-6 py-3 text-left text-xs font-semibold text-slate-500 uppercase tracking-wider">Type</th>
             </tr>
           </thead>
           <tbody className="bg-white divide-y divide-slate-100">
@@ -95,42 +104,40 @@ export const ArticleList: React.FC<ArticleListProps> = ({
                 </td>
               </tr>
             ) : (
-              articles.map((article) => (
-                <tr 
-                  key={article.id} 
-                  onClick={() => onSelectArticle(article.id)}
-                  className={`hover:bg-indigo-50 cursor-pointer transition-colors ${selectedArticleId === article.id ? 'bg-indigo-50 border-l-4 border-l-indigo-500' : ''}`}
-                >
-                  <td className="px-6 py-4">
-                    <div className="text-sm font-semibold text-slate-900 line-clamp-2">
-                      {article.metadata?.title || article.fileName}
-                    </div>
-                    <div className="text-xs text-slate-500 mt-1">
-                      {(article.fileSize / 1024 / 1024).toFixed(2)} MB • {new Date(article.addedAt).toLocaleDateString()}
-                    </div>
-                  </td>
-                  <td className="px-6 py-4">
-                    <div className="text-sm text-slate-600 line-clamp-1">
-                      {article.metadata?.authors.join(', ') || '-'}
-                    </div>
-                  </td>
-                  <td className="px-6 py-4">
-                    <div className="text-sm text-slate-600">
-                      {article.metadata?.year || '-'}
-                    </div>
-                  </td>
-                  <td className="px-6 py-4">
-                    <span className={`px-2 py-1 inline-flex text-xs leading-5 font-semibold rounded-full ${
-                      article.status === 'completed' ? 'bg-green-100 text-green-800' :
-                      article.status === 'processing' ? 'bg-blue-100 text-blue-800 animate-pulse' :
-                      article.status === 'error' ? 'bg-red-100 text-red-800' :
-                      'bg-slate-100 text-slate-800'
-                    }`}>
-                      {article.status.charAt(0).toUpperCase() + article.status.slice(1)}
-                    </span>
-                  </td>
-                </tr>
-              ))
+              articles.map((article) => {
+                const type = article.metadata?.type || 'Non-Deducted';
+                return (
+                  <tr 
+                    key={article.id} 
+                    onClick={() => onSelectArticle(article.id)}
+                    className={`hover:bg-indigo-50 cursor-pointer transition-colors ${selectedArticleId === article.id ? 'bg-indigo-50 border-l-4 border-l-indigo-500' : ''}`}
+                  >
+                    <td className="px-6 py-4">
+                      <div className="text-sm font-semibold text-slate-900 line-clamp-2">
+                        {article.metadata?.title || article.fileName}
+                      </div>
+                      <div className="text-xs text-slate-500 mt-1">
+                        {(article.fileSize / 1024 / 1024).toFixed(2)} MB • {new Date(article.addedAt).toLocaleDateString()}
+                      </div>
+                    </td>
+                    <td className="px-6 py-4">
+                      <div className="text-sm text-slate-600 line-clamp-1">
+                        {article.metadata?.authors.join(', ') || '-'}
+                      </div>
+                    </td>
+                    <td className="px-6 py-4">
+                      <div className="text-sm text-slate-600">
+                        {article.metadata?.year || '-'}
+                      </div>
+                    </td>
+                    <td className="px-6 py-4">
+                      <span className={`px-2 py-1 inline-flex text-xs leading-5 font-semibold rounded-full ${getTypeColor(type)}`}>
+                        {type}
+                      </span>
+                    </td>
+                  </tr>
+                );
+              })
             )}
           </tbody>
         </table>
