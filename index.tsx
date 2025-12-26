@@ -12,6 +12,7 @@ const LibrarianApp = () => {
   const [selectedArticleId, setSelectedArticleId] = useState<string | null>(null);
   const [searchQuery, setSearchQuery] = useState('');
   const [activeSourceId, setActiveSourceId] = useState<string | null>(null);
+  const [isGrouped, setIsGrouped] = useState(false);
 
   // Load data on mount
   useEffect(() => {
@@ -173,6 +174,22 @@ const LibrarianApp = () => {
     if (e.target) e.target.value = ""; // Reset input
   };
 
+  const handleUpdateArticle = async (id: string, updates: Partial<ArticleMetadata>) => {
+    const articleIndex = articles.findIndex(a => a.id === id);
+    if (articleIndex === -1) return;
+
+    const currentArticle = articles[articleIndex];
+    const newMetadata = { ...currentArticle.metadata!, ...updates };
+    const updatedArticle = { ...currentArticle, metadata: newMetadata };
+
+    await saveArticleToDB(updatedArticle);
+    setArticles(prev => {
+      const newArr = [...prev];
+      newArr[articleIndex] = updatedArticle;
+      return newArr;
+    });
+  };
+
   const handleSaveSession = async () => {
     try {
       const { sources, articles } = await getAllData();
@@ -203,6 +220,7 @@ const LibrarianApp = () => {
         setSelectedArticleId(null);
         setActiveSourceId(null);
         setSearchQuery('');
+        setIsGrouped(false);
       } catch (err) {
         console.error("Reset session failed", err);
         alert("Failed to reset session.");
@@ -239,6 +257,7 @@ const LibrarianApp = () => {
         setSelectedArticleId(null);
         setActiveSourceId(null);
         setSearchQuery('');
+        setIsGrouped(false);
       } catch (err) {
         console.error("Import session failed", err);
         alert("Failed to import session. The file might be corrupted.");
@@ -291,11 +310,14 @@ const LibrarianApp = () => {
         onSaveSession={handleSaveSession}
         onImportSession={handleImportSession}
         onResetSession={handleResetSession}
+        isGrouped={isGrouped}
+        onToggleGroup={() => setIsGrouped(prev => !prev)}
       />
 
       <ArticleDetail 
         article={selectedArticle}
         onClose={() => setSelectedArticleId(null)}
+        onUpdateMetadata={handleUpdateArticle}
       />
 
       <style dangerouslySetInnerHTML={{ __html: `

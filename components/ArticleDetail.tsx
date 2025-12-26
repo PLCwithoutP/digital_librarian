@@ -1,17 +1,62 @@
 
-import React from 'react';
-import { Article } from '../types';
+import React, { useState } from 'react';
+import { Article, ArticleMetadata } from '../types';
 import { getFileFromDB } from '../db';
 
 interface ArticleDetailProps {
   article: Article | null | undefined;
   onClose: () => void;
+  onUpdateMetadata: (id: string, updates: Partial<ArticleMetadata>) => void;
 }
 
-export const ArticleDetail: React.FC<ArticleDetailProps> = ({ article, onClose }) => {
+export const ArticleDetail: React.FC<ArticleDetailProps> = ({ article, onClose, onUpdateMetadata }) => {
+  const [newKeyword, setNewKeyword] = useState('');
+  const [newCategory, setNewCategory] = useState('');
+
+  if (!article) return (
+    <div className={`fixed inset-y-0 right-0 w-[450px] bg-white shadow-2xl transform transition-transform duration-300 ease-in-out border-l border-slate-200 flex flex-col z-20 translate-x-full`}></div>
+  );
+
+  const handleAddKeyword = (e: React.KeyboardEvent) => {
+    if (e.key === 'Enter' && newKeyword.trim()) {
+      const currentKeywords = article.metadata?.keywords || [];
+      if (!currentKeywords.includes(newKeyword.trim())) {
+        onUpdateMetadata(article.id, { 
+          keywords: [...currentKeywords, newKeyword.trim()] 
+        });
+      }
+      setNewKeyword('');
+    }
+  };
+
+  const handleRemoveKeyword = (keywordToRemove: string) => {
+    const currentKeywords = article.metadata?.keywords || [];
+    onUpdateMetadata(article.id, { 
+      keywords: currentKeywords.filter(k => k !== keywordToRemove) 
+    });
+  };
+
+  const handleAddCategory = (e: React.KeyboardEvent) => {
+    if (e.key === 'Enter' && newCategory.trim()) {
+        const currentCategories = article.metadata?.categories || [];
+        if (!currentCategories.includes(newCategory.trim())) {
+            onUpdateMetadata(article.id, {
+                categories: [...currentCategories, newCategory.trim()]
+            });
+        }
+        setNewCategory('');
+    }
+  };
+
+  const handleRemoveCategory = (catToRemove: string) => {
+      const currentCategories = article.metadata?.categories || [];
+      onUpdateMetadata(article.id, {
+          categories: currentCategories.filter(c => c !== catToRemove)
+      });
+  };
+
   return (
-    <div className={`fixed inset-y-0 right-0 w-[450px] bg-white shadow-2xl transform transition-transform duration-300 ease-in-out border-l border-slate-200 flex flex-col z-20 ${article ? 'translate-x-0' : 'translate-x-full'}`}>
-      {article && (
+    <div className={`fixed inset-y-0 right-0 w-[450px] bg-white shadow-2xl transform transition-transform duration-300 ease-in-out border-l border-slate-200 flex flex-col z-20 translate-x-0`}>
         <>
           <div className="p-4 border-b border-slate-100 flex items-center justify-between bg-slate-50">
             <h2 className="text-sm font-bold uppercase tracking-wider text-slate-500">Article Summary</h2>
@@ -44,22 +89,55 @@ export const ArticleDetail: React.FC<ArticleDetailProps> = ({ article, onClose }
               </header>
 
               <section>
-                <h4 className="text-xs font-bold text-slate-400 uppercase tracking-widest mb-3">Categories & Keywords</h4>
-                <div className="flex flex-wrap gap-2">
+                <h4 className="text-xs font-bold text-slate-400 uppercase tracking-widest mb-3">Categories (Labels)</h4>
+                <div className="flex flex-wrap gap-2 mb-2">
                   {article.metadata?.categories?.length ? article.metadata.categories.map(cat => (
-                    <span key={cat} className="px-2.5 py-1 bg-indigo-50 text-indigo-700 text-xs font-semibold rounded-md border border-indigo-100">
+                    <span key={cat} className="group px-2.5 py-1 bg-indigo-50 text-indigo-700 text-xs font-semibold rounded-md border border-indigo-100 flex items-center gap-1">
                       {cat}
+                      <button 
+                        onClick={() => handleRemoveCategory(cat)}
+                        className="opacity-0 group-hover:opacity-100 hover:text-indigo-900 transition-opacity"
+                      >
+                         ×
+                      </button>
                     </span>
                   )) : (
                     <span className="text-sm text-slate-400 italic">No categories</span>
                   )}
-                  
+                </div>
+                <input 
+                    type="text" 
+                    className="text-xs w-full px-2 py-1 border border-slate-200 rounded focus:outline-none focus:border-indigo-500"
+                    placeholder="+ Add Label (Press Enter)"
+                    value={newCategory}
+                    onChange={(e) => setNewCategory(e.target.value)}
+                    onKeyDown={handleAddCategory}
+                />
+              </section>
+
+              <section>
+                <h4 className="text-xs font-bold text-slate-400 uppercase tracking-widest mb-3">Keywords</h4>
+                <div className="flex flex-wrap gap-2 mb-2">
                   {article.metadata?.keywords?.map(kw => (
-                    <span key={kw} className="px-2.5 py-1 bg-slate-100 text-slate-600 text-xs font-medium rounded-md border border-slate-200">
+                    <span key={kw} className="group px-2.5 py-1 bg-slate-100 text-slate-600 text-xs font-medium rounded-md border border-slate-200 flex items-center gap-1">
                       {kw}
+                      <button 
+                        onClick={() => handleRemoveKeyword(kw)}
+                        className="opacity-0 group-hover:opacity-100 hover:text-slate-900 transition-opacity"
+                      >
+                         ×
+                      </button>
                     </span>
                   ))}
                 </div>
+                <input 
+                    type="text" 
+                    className="text-xs w-full px-2 py-1 border border-slate-200 rounded focus:outline-none focus:border-indigo-500"
+                    placeholder="+ Add Keyword (Press Enter)"
+                    value={newKeyword}
+                    onChange={(e) => setNewKeyword(e.target.value)}
+                    onKeyDown={handleAddKeyword}
+                />
               </section>
 
               <section className="bg-slate-50 p-6 rounded-xl border border-slate-100">
@@ -89,7 +167,6 @@ export const ArticleDetail: React.FC<ArticleDetailProps> = ({ article, onClose }
             </div>
           </div>
         </>
-      )}
     </div>
   );
 };

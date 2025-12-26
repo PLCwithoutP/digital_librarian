@@ -1,5 +1,5 @@
 
-import React from 'react';
+import React, { useMemo } from 'react';
 import { Article } from '../types';
 
 interface ArticleListProps {
@@ -11,6 +11,8 @@ interface ArticleListProps {
   onSaveSession: () => void;
   onImportSession: () => void;
   onResetSession: () => void;
+  isGrouped: boolean;
+  onToggleGroup: () => void;
 }
 
 const getTypeColor = (type: string | undefined) => {
@@ -30,8 +32,65 @@ export const ArticleList: React.FC<ArticleListProps> = ({
   onSearchChange,
   onSaveSession,
   onImportSession,
-  onResetSession
+  onResetSession,
+  isGrouped,
+  onToggleGroup
 }) => {
+
+  const groupedArticles = useMemo(() => {
+    if (!isGrouped) return null;
+    
+    const groups: Record<string, Article[]> = {};
+    
+    articles.forEach(article => {
+      const categories = article.metadata?.categories?.length 
+        ? article.metadata.categories 
+        : ['Uncategorized'];
+        
+      categories.forEach(cat => {
+        if (!groups[cat]) groups[cat] = [];
+        groups[cat].push(article);
+      });
+    });
+
+    return Object.entries(groups).sort((a, b) => a[0].localeCompare(b[0]));
+  }, [articles, isGrouped]);
+
+  const renderRow = (article: Article) => {
+     const type = article.metadata?.type || 'Non-Deducted';
+     return (
+      <tr 
+        key={article.id} 
+        onClick={() => onSelectArticle(article.id)}
+        className={`hover:bg-indigo-50 cursor-pointer transition-colors ${selectedArticleId === article.id ? 'bg-indigo-50 border-l-4 border-l-indigo-500' : ''}`}
+      >
+        <td className="px-6 py-4">
+          <div className="text-sm font-semibold text-slate-900 line-clamp-2">
+            {article.metadata?.title || article.fileName}
+          </div>
+          <div className="text-xs text-slate-500 mt-1">
+            {(article.fileSize / 1024 / 1024).toFixed(2)} MB • {new Date(article.addedAt).toLocaleDateString()}
+          </div>
+        </td>
+        <td className="px-6 py-4">
+          <div className="text-sm text-slate-600 line-clamp-1">
+            {article.metadata?.authors.join(', ') || '-'}
+          </div>
+        </td>
+        <td className="px-6 py-4">
+          <div className="text-sm text-slate-600">
+            {article.metadata?.year || '-'}
+          </div>
+        </td>
+        <td className="px-6 py-4">
+          <span className={`px-2 py-1 inline-flex text-xs leading-5 font-semibold rounded-full ${getTypeColor(type)}`}>
+            {type}
+          </span>
+        </td>
+      </tr>
+     );
+  };
+
   return (
     <main className="flex-1 flex flex-col min-w-0">
       <header className="bg-white border-b border-slate-200 p-4 flex items-center justify-between shadow-sm z-10 gap-4">
@@ -51,6 +110,23 @@ export const ArticleList: React.FC<ArticleListProps> = ({
         </div>
 
         <div className="flex items-center gap-2">
+          <button
+             onClick={onToggleGroup}
+             className={`px-3 py-2 text-sm font-medium border rounded-lg flex items-center gap-2 transition-colors focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-indigo-500 ${
+                 isGrouped 
+                 ? 'bg-indigo-50 text-indigo-700 border-indigo-200' 
+                 : 'bg-white text-slate-700 border-slate-300 hover:bg-slate-50'
+             }`}
+             title="Group by Categories"
+          >
+            <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+               <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 6h16M4 12h16M4 18h16" />
+            </svg>
+            <span className="hidden lg:inline">{isGrouped ? 'Ungroup' : 'Group by Label'}</span>
+          </button>
+
+          <div className="h-6 w-px bg-slate-300 mx-1"></div>
+
           <button 
             onClick={onSaveSession}
             className="px-3 py-2 text-sm font-medium text-slate-700 bg-white border border-slate-300 rounded-lg hover:bg-slate-50 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-indigo-500 flex items-center gap-2 transition-colors"
@@ -103,41 +179,19 @@ export const ArticleList: React.FC<ArticleListProps> = ({
                   No articles found.
                 </td>
               </tr>
+            ) : isGrouped && groupedArticles ? (
+                groupedArticles.map(([category, groupArticles]) => (
+                    <React.Fragment key={category}>
+                        <tr className="bg-slate-100">
+                            <td colSpan={4} className="px-6 py-2 text-xs font-bold uppercase tracking-wider text-slate-600">
+                                {category} ({groupArticles.length})
+                            </td>
+                        </tr>
+                        {groupArticles.map(renderRow)}
+                    </React.Fragment>
+                ))
             ) : (
-              articles.map((article) => {
-                const type = article.metadata?.type || 'Non-Deducted';
-                return (
-                  <tr 
-                    key={article.id} 
-                    onClick={() => onSelectArticle(article.id)}
-                    className={`hover:bg-indigo-50 cursor-pointer transition-colors ${selectedArticleId === article.id ? 'bg-indigo-50 border-l-4 border-l-indigo-500' : ''}`}
-                  >
-                    <td className="px-6 py-4">
-                      <div className="text-sm font-semibold text-slate-900 line-clamp-2">
-                        {article.metadata?.title || article.fileName}
-                      </div>
-                      <div className="text-xs text-slate-500 mt-1">
-                        {(article.fileSize / 1024 / 1024).toFixed(2)} MB • {new Date(article.addedAt).toLocaleDateString()}
-                      </div>
-                    </td>
-                    <td className="px-6 py-4">
-                      <div className="text-sm text-slate-600 line-clamp-1">
-                        {article.metadata?.authors.join(', ') || '-'}
-                      </div>
-                    </td>
-                    <td className="px-6 py-4">
-                      <div className="text-sm text-slate-600">
-                        {article.metadata?.year || '-'}
-                      </div>
-                    </td>
-                    <td className="px-6 py-4">
-                      <span className={`px-2 py-1 inline-flex text-xs leading-5 font-semibold rounded-full ${getTypeColor(type)}`}>
-                        {type}
-                      </span>
-                    </td>
-                  </tr>
-                );
-              })
+              articles.map(renderRow)
             )}
           </tbody>
         </table>
