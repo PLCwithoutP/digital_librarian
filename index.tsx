@@ -5,6 +5,7 @@ import { getAllData, saveArticleToDB, saveFileToDB, saveSourceToDB, getFileFromD
 import { Sidebar } from './components/Sidebar';
 import { ArticleList } from './components/ArticleList';
 import { ArticleDetail } from './components/ArticleDetail';
+import { SettingsModal, ThemeOption } from './components/SettingsModal';
 
 const LibrarianApp = () => {
   const [sources, setSources] = useState<Source[]>([]);
@@ -14,6 +15,39 @@ const LibrarianApp = () => {
   const [activeSourceId, setActiveSourceId] = useState<string | null>(null);
   const [isGrouped, setIsGrouped] = useState(false);
   const [sortConfig, setSortConfig] = useState<{ key: string; direction: 'asc' | 'desc' } | null>(null);
+  
+  // Settings & Theme
+  const [isSettingsOpen, setIsSettingsOpen] = useState(false);
+  const [theme, setTheme] = useState<ThemeOption>('default');
+
+  // Initialize theme
+  useEffect(() => {
+    const savedTheme = localStorage.getItem('librarian_theme') as ThemeOption | null;
+    if (savedTheme) {
+      setTheme(savedTheme);
+    }
+  }, []);
+
+  // Apply theme
+  useEffect(() => {
+    const root = window.document.documentElement;
+    root.classList.remove('dark');
+
+    if (theme === 'dark') {
+      root.classList.add('dark');
+    } else if (theme === 'default') {
+      if (window.matchMedia('(prefers-color-scheme: dark)').matches) {
+        root.classList.add('dark');
+      }
+    }
+    
+    // Save preference
+    if (theme !== 'default') {
+      localStorage.setItem('librarian_theme', theme);
+    } else {
+      localStorage.removeItem('librarian_theme');
+    }
+  }, [theme]);
 
   // Initialize fresh session on mount
   useEffect(() => {
@@ -387,7 +421,7 @@ const LibrarianApp = () => {
   const selectedArticle = articles.find(a => a.id === selectedArticleId);
 
   return (
-    <div className="flex h-screen w-screen bg-slate-50 font-sans text-slate-900 overflow-hidden">
+    <div className="flex h-screen w-screen bg-slate-50 dark:bg-slate-950 font-sans text-slate-900 dark:text-slate-100 overflow-hidden transition-colors duration-200">
       <Sidebar 
         sources={sources}
         articles={articles}
@@ -395,6 +429,7 @@ const LibrarianApp = () => {
         onSetActiveSource={setActiveSourceId}
         onAddSource={handleAddSource}
         onAddPDF={handleAddPDF}
+        onOpenSettings={() => setIsSettingsOpen(true)}
       />
 
       <ArticleList 
@@ -418,6 +453,13 @@ const LibrarianApp = () => {
         onUpdateMetadata={handleUpdateArticle}
       />
 
+      <SettingsModal 
+        isOpen={isSettingsOpen}
+        onClose={() => setIsSettingsOpen(false)}
+        currentTheme={theme}
+        onThemeChange={setTheme}
+      />
+
       <style dangerouslySetInnerHTML={{ __html: `
         @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap');
         
@@ -432,7 +474,7 @@ const LibrarianApp = () => {
           height: 8px;
         }
         ::-webkit-scrollbar-track {
-          background: #f1f1f1;
+          background: transparent;
         }
         ::-webkit-scrollbar-thumb {
           background: #cbd5e1;
@@ -440,6 +482,12 @@ const LibrarianApp = () => {
         }
         ::-webkit-scrollbar-thumb:hover {
           background: #94a3b8;
+        }
+        .dark ::-webkit-scrollbar-thumb {
+          background: #475569;
+        }
+        .dark ::-webkit-scrollbar-thumb:hover {
+           background: #64748b;
         }
       `}} />
     </div>
