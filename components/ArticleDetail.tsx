@@ -31,17 +31,28 @@ export const ArticleDetail: React.FC<ArticleDetailProps> = ({
   const [isEditingAuthors, setIsEditingAuthors] = useState(false);
   const [authorsInput, setAuthorsInput] = useState('');
   
+  // New State for Journal/Volume
+  const [isEditingJournal, setIsEditingJournal] = useState(false);
+  const [journalInput, setJournalInput] = useState('');
+  const [isEditingVolume, setIsEditingVolume] = useState(false);
+  const [volumeInput, setVolumeInput] = useState('');
+  
   // PDF Viewing State
   const [pdfUrl, setPdfUrl] = useState<string | null>(null);
   const [isLoadingPdf, setIsLoadingPdf] = useState(false);
 
-  // Update title/author input when article changes
+  // Update inputs when article changes
   useEffect(() => {
     if (article) {
         setTitleInput(article.metadata?.title || article.fileName);
         setAuthorsInput(article.metadata?.authors?.join(', ') || '');
+        setJournalInput(article.metadata?.journal || 'Unknown Journal');
+        setVolumeInput(article.metadata?.volume || '');
+        
         setIsEditingTitle(false);
         setIsEditingAuthors(false);
+        setIsEditingJournal(false);
+        setIsEditingVolume(false);
         setPdfUrl(null); // Reset PDF view on article change
     }
   }, [article]);
@@ -113,6 +124,16 @@ export const ArticleDetail: React.FC<ArticleDetailProps> = ({
       const newAuthors = authorsInput.split(',').map(s => s.trim()).filter(s => s.length > 0);
       onUpdateMetadata(article.id, { authors: newAuthors.length > 0 ? newAuthors : ["Unknown"] });
       setIsEditingAuthors(false);
+  };
+
+  const handleSaveJournal = () => {
+      onUpdateMetadata(article.id, { journal: journalInput.trim() || "Unknown Journal" });
+      setIsEditingJournal(false);
+  };
+
+  const handleSaveVolume = () => {
+      onUpdateMetadata(article.id, { volume: volumeInput.trim() });
+      setIsEditingVolume(false);
   };
 
   const handleDeleteNoteClick = (id: string) => {
@@ -338,6 +359,85 @@ export const ArticleDetail: React.FC<ArticleDetailProps> = ({
                             </span>
                         )}
                     </div>
+                    
+                    {/* Journal Field */}
+                    <div className="flex gap-2 text-sm group/journal">
+                        <span className="font-semibold text-slate-500 dark:text-slate-400 w-16 pt-1">Journal:</span>
+                        {isEditingJournal ? (
+                             <div className="flex-1">
+                                <input
+                                    className="w-full text-sm text-slate-700 dark:text-slate-300 bg-white dark:bg-slate-800 border border-indigo-500 rounded p-1 focus:outline-none"
+                                    value={journalInput}
+                                    onChange={(e) => setJournalInput(e.target.value)}
+                                    onBlur={handleSaveJournal}
+                                    onKeyDown={(e) => {
+                                        if (e.key === 'Enter') {
+                                            e.preventDefault();
+                                            handleSaveJournal();
+                                        }
+                                        if (e.key === 'Escape') {
+                                            setIsEditingJournal(false);
+                                            setJournalInput(article.metadata?.journal || 'Unknown Journal');
+                                        }
+                                    }}
+                                    autoFocus
+                                />
+                             </div>
+                        ) : (
+                            <span 
+                                className="text-slate-700 dark:text-slate-300 flex-1 cursor-pointer hover:text-indigo-600 dark:hover:text-indigo-400 transition-colors relative pt-1"
+                                onClick={() => setIsEditingJournal(true)}
+                                title="Click to edit journal"
+                            >
+                                {article.metadata?.journal || 'Unknown Journal'}
+                                <button className="inline-block ml-2 text-slate-300 hover:text-indigo-500 opacity-0 group-hover/journal:opacity-100 transition-opacity">
+                                    <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15.232 5.232l3.536 3.536m-2.036-5.036a2.5 2.5 0 113.536 3.536L6.5 21.036H3v-3.572L16.732 3.732z" />
+                                    </svg>
+                                </button>
+                            </span>
+                        )}
+                    </div>
+
+                    {/* Volume Field */}
+                    <div className="flex gap-2 text-sm group/volume">
+                        <span className="font-semibold text-slate-500 dark:text-slate-400 w-16 pt-1">Volume:</span>
+                        {isEditingVolume ? (
+                             <div className="flex-1">
+                                <input
+                                    className="w-full text-sm text-slate-700 dark:text-slate-300 bg-white dark:bg-slate-800 border border-indigo-500 rounded p-1 focus:outline-none"
+                                    value={volumeInput}
+                                    onChange={(e) => setVolumeInput(e.target.value)}
+                                    onBlur={handleSaveVolume}
+                                    onKeyDown={(e) => {
+                                        if (e.key === 'Enter') {
+                                            e.preventDefault();
+                                            handleSaveVolume();
+                                        }
+                                        if (e.key === 'Escape') {
+                                            setIsEditingVolume(false);
+                                            setVolumeInput(article.metadata?.volume || '');
+                                        }
+                                    }}
+                                    autoFocus
+                                />
+                             </div>
+                        ) : (
+                            <span 
+                                className="text-slate-700 dark:text-slate-300 flex-1 cursor-pointer hover:text-indigo-600 dark:hover:text-indigo-400 transition-colors relative pt-1 min-h-[1.5rem]"
+                                onClick={() => setIsEditingVolume(true)}
+                                title="Click to edit volume"
+                            >
+                                {article.metadata?.volume || '-'}
+                                <button className="inline-block ml-2 text-slate-300 hover:text-indigo-500 opacity-0 group-hover/volume:opacity-100 transition-opacity">
+                                    <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15.232 5.232l3.536 3.536m-2.036-5.036a2.5 2.5 0 113.536 3.536L6.5 21.036H3v-3.572L16.732 3.732z" />
+                                    </svg>
+                                </button>
+                            </span>
+                        )}
+                    </div>
+
                     <div className="flex gap-2 text-sm">
                         <span className="font-semibold text-slate-500 dark:text-slate-400 w-16">Year:</span>
                         <span className="text-slate-700 dark:text-slate-300">{article.metadata?.year || 'Unknown'}</span>

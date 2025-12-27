@@ -2,6 +2,8 @@
 export interface ArticleMetadata {
   title: string;
   authors: string[];
+  journal?: string;
+  volume?: string;
   year: string;
   categories: string[];
   keywords: string[];

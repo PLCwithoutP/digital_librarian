@@ -12,6 +12,76 @@ import { NotebookEditor } from './components/NotebookEditor';
 import { AddSourceModal } from './components/AddSourceModal';
 import { GenerateModal } from './components/GenerateModal';
 
+// Helper to regenerate BibTeX based on metadata
+const generateBibTeX = (oldBibtex: string | undefined, meta: ArticleMetadata, filename: string): string => {
+    let key = '';
+    let doi = '';
+    let existingNote = '';
+    let existingFile = '';
+    let howpublished = '';
+    
+    if (oldBibtex) {
+        const keyMatch = oldBibtex.match(/@\w+\s*\{\s*([^,]+),/);
+        if (keyMatch) key = keyMatch[1];
+        
+        const doiMatch = oldBibtex.match(/doi\s*=\s*[\{"](.+?)[\}"]/i);
+        if (doiMatch) doi = doiMatch[1];
+
+        const noteMatch = oldBibtex.match(/note\s*=\s*[\{"](.+?)[\}"]/i);
+        if (noteMatch) existingNote = noteMatch[1];
+        
+        const fileMatch = oldBibtex.match(/file\s*=\s*[\{"](.+?)[\}"]/i);
+        if (fileMatch) existingFile = fileMatch[1];
+
+        const howpMatch = oldBibtex.match(/howpublished\s*=\s*[\{"](.+?)[\}"]/i);
+        if (howpMatch) howpublished = howpMatch[1];
+    }
+
+    if (!key) {
+        // Generate a simple key: AuthorYearTitleWord
+        const author = meta.authors[0]?.split(' ').pop()?.toLowerCase().replace(/[^a-z]/g, '') || 'unknown';
+        const year = (meta.year && meta.year !== 'Unknown') ? meta.year : '0000';
+        const titleWord = meta.title.split(' ')[0]?.toLowerCase().replace(/[^a-z]/g, '') || 'article';
+        key = `${author}${year}${titleWord}`;
+    }
+
+    const isArticle = (meta.journal && meta.journal !== "Unknown Journal");
+    const type = isArticle ? "article" : "misc";
+
+    const lines: string[] = [];
+    lines.push(`@${type}{${key},`);
+    lines.push(`  author = {${meta.authors.join(' and ')}},`);
+    lines.push(`  title = {${meta.title}},`);
+    
+    if (meta.year && meta.year !== 'Unknown') {
+        lines.push(`  year = {${meta.year}},`);
+    }
+    
+    if (isArticle) {
+        lines.push(`  journal = {${meta.journal}},`);
+    }
+    if (meta.volume) {
+        lines.push(`  volume = {${meta.volume}},`);
+    }
+    
+    if (howpublished) {
+        lines.push(`  howpublished = {${howpublished}},`);
+    } else if (!isArticle) {
+        lines.push(`  howpublished = {PDF},`);
+    }
+    
+    if (doi) lines.push(`  doi = {${doi}},`);
+    
+    const note = existingNote || `Local PDF: ${filename}`;
+    lines.push(`  note = {${note}},`);
+    
+    if (existingFile) {
+        lines.push(`  file = {${existingFile}}`);
+    }
+
+    return lines.join('\n') + '\n}';
+};
+
 const LibrarianApp = () => {
   const [sources, setSources] = useState<Source[]>([]);
   const [articles, setArticles] = useState<Article[]>([]);
@@ -167,6 +237,8 @@ const LibrarianApp = () => {
           return {
               title: meta.title || meta.pdf_meta?.['/Title'] || file.name.replace(/\.pdf$/i, ''),
               authors: authors,
+              journal: meta.journal || "Unknown Journal",
+              volume: meta.volume || "",
               year: year,
               abstract: meta.abstract || "",
               keywords: keywords,
@@ -177,6 +249,8 @@ const LibrarianApp = () => {
           return {
               title: file.name.replace(/\.pdf$/i, ''),
               authors: ["Unknown"],
+              journal: "Unknown Journal",
+              volume: "",
               year: "Unknown",
               categories: ["Uncategorized"],
               keywords: [],
@@ -214,10 +288,7 @@ const LibrarianApp = () => {
             if (!parentId) {
                 const existing = sources.find(s => s.name === folderName && !s.parentId);
                 if (existing) {
-                    // We treat it as a new import, so we might duplicate or merge. 
-                    // For simplicity in this logic, we create a new ID. 
-                    // If strict merging is needed, we'd use existing.id.
-                    // Let's generate a new ID to avoid complexity with cleaning up old matching trees.
+                    // We treat it as a new import
                 }
             }
 
@@ -260,9 +331,6 @@ const LibrarianApp = () => {
                 }
                 sourceId = pathSourceIdMap.get(currentPath)!;
             } else {
-                // Root level file, assign to a generic "Root Upload" source or similar?
-                // For "Add Folder", usually the first part is the folder name.
-                // If user dragged a file directly, webkitRelativePath might be empty or just filename.
                 const rootSourceName = "Imported Files";
                 let rootSource = newSources.find(s => s.name === rootSourceName);
                 if (!rootSource) {
@@ -307,7 +375,7 @@ const LibrarianApp = () => {
         setSources(prev => [...prev, ...newSources]);
         setArticles(prev => [...prev, ...newArticles]);
 
-    } catch (err) {
+    } catch (err: any) {
         console.error("Import failed", err);
         alert("Failed to import folder structure.");
     } finally {
@@ -364,7 +432,7 @@ const LibrarianApp = () => {
         }
 
         setArticles(prev => [...prev, ...newArticles]);
-      } catch(err) {
+      } catch(err: any) {
           console.error(err);
           alert("Error importing files.");
       } finally {
@@ -384,7 +452,7 @@ const LibrarianApp = () => {
             await saveArticleToDB(updated);
             setArticles(prev => prev.map(a => a.id === articleId ? updated : a));
         }
-      } catch(err) {
+      } catch(err: any) {
         console.error(err);
         alert("Failed to replace PDF.");
       } finally {
@@ -446,7 +514,7 @@ const LibrarianApp = () => {
               setSelectedArticleId(null);
           }
 
-      } catch (err) {
+      } catch (err: any) {
           console.error("Delete source failed", err);
           alert("Failed to delete source.");
       } finally {
@@ -646,7 +714,7 @@ const LibrarianApp = () => {
                 URL.revokeObjectURL(url);
             }
         }
-    } catch(e) {
+    } catch(e: any) {
         console.error(e);
         alert("Failed to generate output");
     } finally {
@@ -660,6 +728,11 @@ const LibrarianApp = () => {
 
     const currentArticle = articles[articleIndex];
     const newMetadata = { ...currentArticle.metadata!, ...updates };
+    
+    // Regenerate BibTeX based on new metadata
+    const newBibtex = generateBibTeX(currentArticle.metadata?.bibtex, newMetadata, currentArticle.fileName);
+    newMetadata.bibtex = newBibtex;
+    
     const updatedArticle = { ...currentArticle, metadata: newMetadata };
 
     await saveArticleToDB(updatedArticle);
@@ -748,7 +821,7 @@ const LibrarianApp = () => {
         if (selectedNote && selectedNote.id === id) {
             setSelectedNote(null);
         }
-      } catch (e) {
+      } catch (e: any) {
         console.error("Failed to delete note", e);
         alert("Failed to delete note.");
       }
@@ -778,7 +851,7 @@ const LibrarianApp = () => {
       a.download = `librarian-session-${new Date().toISOString().slice(0,10)}.json`;
       a.click();
       URL.revokeObjectURL(url);
-    } catch (err) {
+    } catch (err: any) {
       console.error("Save session failed", err);
       alert("Failed to save session.");
     } finally {
@@ -802,19 +875,19 @@ const LibrarianApp = () => {
         }));
         
         // 2. Delete associated notes from DB
-        const notesToDelete = notes.filter(n => n.type === 'article' && n.targetId && checkedArticleIds.has(n.targetId));
+        const notesToDelete = notes.filter(n => n.type === 'article' && n.targetId && checkedArticleIds.has(n.targetId as string));
         await Promise.all(notesToDelete.map(n => deleteNoteFromDB(n.id)));
 
         // 3. Update State
         setArticles(prev => prev.filter(a => !checkedArticleIds.has(a.id)));
-        setNotes(prev => prev.filter(n => !(n.type === 'article' && n.targetId && checkedArticleIds.has(n.targetId))));
+        setNotes(prev => prev.filter(n => !(n.type === 'article' && n.targetId && checkedArticleIds.has(n.targetId as string))));
         
         setCheckedArticleIds(new Set());
         
         if (selectedArticleId && checkedArticleIds.has(selectedArticleId)) {
             setSelectedArticleId(null);
         }
-      } catch (err) {
+      } catch (err: any) {
         console.error("Delete articles failed", err);
         alert("Failed to delete articles.");
       } finally {
@@ -858,7 +931,7 @@ const LibrarianApp = () => {
         setIsGrouped(false);
         setSortConfig(null);
         setCheckedArticleIds(new Set());
-      } catch (err) {
+      } catch (err: any) {
         console.error("Import session failed", err);
         alert("Failed to import session. The file might be corrupted.");
       } finally {
@@ -904,6 +977,7 @@ const LibrarianApp = () => {
           a.fileName.toLowerCase().includes(q) ||
           m?.title.toLowerCase().includes(q) ||
           m?.authors.some(auth => auth.toLowerCase().includes(q)) ||
+          m?.journal?.toLowerCase().includes(q) ||
           m?.year.includes(q) ||
           m?.keywords.some(k => k.toLowerCase().includes(q)) ||
           m?.categories.some(c => c.toLowerCase().includes(q))
@@ -925,9 +999,13 @@ const LibrarianApp = () => {
             valA = (a.metadata?.authors?.[0] || '').toLowerCase();
             valB = (b.metadata?.authors?.[0] || '').toLowerCase();
             break;
+          case 'journal':
+            valA = (a.metadata?.journal || '').toLowerCase();
+            valB = (b.metadata?.journal || '').toLowerCase();
+            break;
           case 'year':
-            const yearA = parseInt(a.metadata?.year || '0', 10);
-            const yearB = parseInt(b.metadata?.year || '0', 10);
+            const yearA = parseInt(String(a.metadata?.year || '0'), 10);
+            const yearB = parseInt(String(b.metadata?.year || '0'), 10);
             valA = isNaN(yearA) ? 0 : yearA;
             valB = isNaN(yearB) ? 0 : yearB;
             break;
