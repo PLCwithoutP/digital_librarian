@@ -4,6 +4,7 @@ export interface ArticleMetadata {
   authors: string[];
   journal?: string;
   volume?: string;
+  number?: string | number | null; // Issue number
   year: string;
   categories: string[];
   keywords: string[];
@@ -15,6 +16,7 @@ export interface Article {
   id: string;
   sourceId: string;
   fileName: string;
+  filePath?: string; // Relative path from upload
   fileSize: number;
   addedAt: number;
   metadata?: ArticleMetadata;
