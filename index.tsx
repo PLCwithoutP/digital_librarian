@@ -1,3 +1,4 @@
+
 import React, { useState, useEffect, useMemo, Suspense } from 'react';
 import { createRoot } from 'react-dom/client';
 import { Article, Source, ArticleMetadata, Note, NoteType } from './types';
@@ -12,28 +13,43 @@ import { NotebookEditor } from './components/NotebookEditor';
 import { AddSourceModal } from './components/AddSourceModal';
 import { GenerateModal } from './components/GenerateModal';
 
-// Helper to generate BibTeX key and string client-side
-const generateBibtexData = (art: Article) => {
+// Helper to generate a BibTeX key and entry client-side
+const generateBibtexEntry = (art: Article) => {
   const m = art.metadata!;
   const year = m.year && m.year !== "Unknown" ? m.year : "0000";
   const authors = m.authors || [];
-  const firstAuthorRaw = authors[0] || "anon";
-  const lastName = firstAuthorRaw.split(' ').pop()?.toLowerCase().replace(/[^a-z0-9]/g, '') || "anon";
-  const titleWords = (m.title || "").split(' ').filter(w => w.length > 3);
+  
+  // Key generation logic: [FirstAuthorLastName][Year][FirstSignificantTitleWord]
+  let lastName = "anon";
+  if (authors.length > 0) {
+    const parts = authors[0].split(' ');
+    lastName = parts[parts.length - 1].toLowerCase().replace(/[^a-z0-9]/g, '');
+  }
+  
+  const titleWords = (m.title || "").split(/\s+/).filter(w => w.length > 3);
   const firstTitleWord = (titleWords[0] || "entry").toLowerCase().replace(/[^a-z0-9]/g, '');
-  const key = `${lastName}${year}${firstTitleWord}`;
+  const baseKey = `${lastName}${year}${firstTitleWord}`;
+  
+  // Note: we don't have global state for key collisions here, 
+  // but we return it as requested.
+  const bibKey = baseKey;
   
   const authorsStr = authors.join(' and ');
-  let bib = `@misc{${key},\n`;
+  let bib = `@misc{${bibKey},\n`;
   if (authorsStr) bib += `  author = {${authorsStr}},\n`;
   bib += `  title = {${m.title || ""}},\n`;
   bib += `  year = {${year}},\n`;
+  if (m.journal) bib += `  journal = {${m.journal}},\n`;
+  if (m.volume) bib += `  volume = {${m.volume}},\n`;
+  if (m.number) bib += `  number = {${m.number}},\n`;
+  if (m.doi) bib += `  doi = {${m.doi}},\n`;
+  if (m.url) bib += `  url = {${m.url}},\n`;
   bib += `  howpublished = {PDF},\n`;
   bib += `  note = {Local PDF: ${art.fileName}},\n`;
   bib += `  file = {${art.filePath || art.fileName}}\n`;
   bib += `}`;
   
-  return { key, bib };
+  return { key: bibKey, bib };
 };
 
 const LibrarianApp = () => {
@@ -85,13 +101,86 @@ const LibrarianApp = () => {
         setArticles(data.articles || []);
         setNotes(data.notes || []);
       } catch (err) {
-        console.error("Failed to initialize session", err);
+        console.error("Failed to load session", err);
       } finally {
         setIsLoading(false);
       }
     };
     initSession();
   }, []);
+
+  const handleExportMetadata = (targetArticles?: Article[], fileName: string = 'parsed_pdfs.json') => {
+    const list = targetArticles || articles;
+    if (list.length === 0) {
+      alert("No articles to export.");
+      return;
+    }
+
+    const exportData = {
+      root_path: list[0]?.filePath?.split('/')[0] || "Librarian Library",
+      generated_at: new Date().toISOString().split('.')[0],
+      pdf_count: list.length,
+      pdfs: list.map(art => ({
+        file_path: art.filePath || art.fileName,
+        file_name: art.fileName,
+        title: art.metadata?.title || "",
+        authors: art.metadata?.authors || [],
+        year: parseInt(String(art.metadata?.year)) || null,
+        journal: art.metadata?.journal || "",
+        volume: art.metadata?.volume || null,
+        number: art.metadata?.number || null
+      }))
+    };
+
+    const blob = new Blob([JSON.stringify(exportData, null, 2)], { type: 'application/json' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = fileName;
+    a.click();
+    URL.revokeObjectURL(url);
+  };
+
+  const handleExportBibtex = (targetArticles?: Article[]) => {
+    const list = targetArticles || articles;
+    if (list.length === 0) return;
+
+    const entries = list.map(art => {
+      const { key, bib } = generateBibtexEntry(art);
+      const m = art.metadata!;
+      return {
+        file_path: art.filePath || art.fileName,
+        file_name: art.fileName,
+        title: m.title || "",
+        authors: m.authors || [],
+        year: parseInt(String(m.year)) || null,
+        journal: m.journal || "",
+        volume: m.volume || null,
+        number: m.number || null,
+        doi: m.doi || "",
+        url: m.url || "",
+        bibtex_type: "misc",
+        bibtex_key: key,
+        bibtex: bib
+      };
+    });
+
+    const exportData = {
+      root_path: list[0]?.filePath?.split('/')[0] || "Librarian Library",
+      source_parsed_json: "parsed_pdfs.json",
+      generated_at: new Date().toISOString().split('.')[0],
+      bibtex_count: entries.length,
+      entries: entries
+    };
+
+    const blob = new Blob([JSON.stringify(exportData, null, 2)], { type: 'application/json' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = 'bibtex_pdfs.json';
+    a.click();
+    URL.revokeObjectURL(url);
+  };
 
   const processMetadataFiles = async (files: File[]): Promise<Map<string, any>> => {
       const jsonFiles = files.filter(f => f.name.toLowerCase().endsWith('.json'));
@@ -101,7 +190,6 @@ const LibrarianApp = () => {
           try {
               const text = await jsonFile.text();
               const data = JSON.parse(text);
-              
               if (data.pdfs && Array.isArray(data.pdfs)) {
                   data.pdfs.forEach((pdf: any) => {
                       if (pdf.file_name) pdfMetadataMap.set(pdf.file_name, pdf);
@@ -126,7 +214,7 @@ const LibrarianApp = () => {
       if (meta) {
           return {
               title: meta.title || file.name.replace(/\.pdf$/i, ''),
-              authors: Array.isArray(meta.authors) ? meta.authors : meta.pdf_meta?.['/Author'] ? [meta.pdf_meta['/Author']] : [],
+              authors: Array.isArray(meta.authors) ? meta.authors : [],
               journal: meta.journal || "",
               volume: meta.volume || "",
               number: meta.number || null,
@@ -156,48 +244,18 @@ const LibrarianApp = () => {
       }
   };
 
-  const handleExportMetadata = (customArticles?: Article[], fileName: string = 'parsed_pdfs.json') => {
-    const listToExport = customArticles || articles;
-    if (listToExport.length === 0) {
-      if (!customArticles) alert("No articles to export.");
-      return;
-    }
-
-    const exportData = {
-      root_path: "Librarian Library",
-      generated_at: new Date().toISOString().split('.')[0],
-      pdf_count: listToExport.length,
-      pdfs: listToExport.map(art => ({
-        file_path: art.filePath || art.fileName,
-        file_name: art.fileName,
-        title: art.metadata?.title || art.fileName,
-        authors: art.metadata?.authors || [],
-        year: parseInt(String(art.metadata?.year)) || null,
-        journal: art.metadata?.journal || "",
-        volume: art.metadata?.volume || null,
-        number: art.metadata?.number || null
-      }))
-    };
-
-    const blob = new Blob([JSON.stringify(exportData, null, 2)], { type: 'application/json' });
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement('a');
-    a.href = url;
-    a.download = fileName;
-    a.click();
-    URL.revokeObjectURL(url);
-  };
-
   const handleAddSource = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const files = e.target.files;
     if (!files || files.length === 0) return;
     setIsLoading(true);
-    setLoadingMessage('Processing folder structure...');
+    setLoadingMessage('Importing folder contents...');
     try {
         const fileList: File[] = Array.from(files);
         const pathSourceIdMap = new Map<string, string>();
         const newSources: Source[] = [];
-        
+        const pdfMetadataMap = await processMetadataFiles(fileList);
+        const newArticles: Article[] = [];
+
         const getOrCreateSource = (fullPath: string, folderName: string, parentPath: string | null): string => {
             if (pathSourceIdMap.has(fullPath)) return pathSourceIdMap.get(fullPath)!;
             const id = crypto.randomUUID();
@@ -207,9 +265,6 @@ const LibrarianApp = () => {
             pathSourceIdMap.set(fullPath, id);
             return id;
         };
-
-        const pdfMetadataMap = await processMetadataFiles(fileList);
-        const newArticles: Article[] = [];
 
         for (const file of fileList) {
             if (!file.name.toLowerCase().endsWith('.pdf')) continue;
@@ -240,7 +295,7 @@ const LibrarianApp = () => {
             const articleMetadata = createMetadata(file, meta);
             const articleId = crypto.randomUUID();
             
-            newArticles.push({
+            const newArt: Article = {
                 id: articleId,
                 sourceId,
                 fileName: file.name,
@@ -249,23 +304,24 @@ const LibrarianApp = () => {
                 addedAt: Date.now(),
                 status: 'completed',
                 metadata: articleMetadata
-            });
+            };
+            newArticles.push(newArt);
             await saveFileToDB(articleId, file);
+            await saveArticleToDB(newArt);
         }
 
-        for (const a of newArticles) await saveArticleToDB(a);
         for (const s of newSources) await saveSourceToDB(s);
 
         setSources(prev => [...prev, ...newSources]);
         setArticles(prev => [...prev, ...newArticles]);
         
-        // As requested: create parsed_pdfs.json for the newly uploaded articles
+        // As requested: generate the parsed_pdfs.json for the newly imported articles
         if (newArticles.length > 0) {
             handleExportMetadata(newArticles, 'parsed_pdfs.json');
         }
     } catch (err) {
-        console.error("Import failed", err);
-        alert("Failed to import folder structure.");
+        console.error("Folder import failed", err);
+        alert("Failed to import folder.");
     } finally {
         setIsLoading(false);
         if (e.target) e.target.value = "";
@@ -276,7 +332,7 @@ const LibrarianApp = () => {
       const files = e.target.files;
       if (!files || files.length === 0) return;
       setIsLoading(true);
-      setLoadingMessage('Importing PDF files...');
+      setLoadingMessage('Importing PDFs...');
       try {
         let uploadSource = sources.find(s => s.name === "Uploaded Files");
         let sourceId = uploadSource?.id;
@@ -329,19 +385,11 @@ const LibrarianApp = () => {
     });
   };
 
-  const handleSort = (key: string) => {
-    setSortConfig(current => {
-      if (current?.key === key) return { key, direction: current.direction === 'asc' ? 'desc' : 'asc' };
-      return { key, direction: 'asc' };
-    });
-  };
-
   const handleDeleteSource = async (id: string) => {
-    if (!window.confirm("Are you sure you want to remove this folder and all its articles from the UI? (Real files will not be touched)")) return;
+    if (!window.confirm("Remove this folder and all its articles from the UI? (Real files on your disk will NOT be touched)")) return;
     setIsLoading(true);
-    setLoadingMessage('Removing from library...');
+    setLoadingMessage('Removing from view...');
     try {
-      // Find all nested sources recursively
       const allSourceIdsToDelete = new Set<string>();
       const collectIds = (sid: string) => {
           allSourceIdsToDelete.add(sid);
@@ -349,116 +397,32 @@ const LibrarianApp = () => {
       };
       collectIds(id);
 
-      // Identify articles in these sources
-      const articlesToDelete = articles.filter(a => allSourceIdsToDelete.has(a.sourceId));
-      const articleIdsToDelete = new Set(articlesToDelete.map(a => a.id));
+      const articlesToRemove = articles.filter(a => allSourceIdsToDelete.has(a.sourceId));
+      const articleIdsToRemove = new Set(articlesToRemove.map(a => a.id));
 
-      // Remove articles from DB
-      for (const aid of articleIdsToDelete) {
+      for (const aid of articleIdsToRemove) {
           await deleteArticleFromDB(aid);
-          await deleteFileFromDB(aid); // Remove local blob copy, not real file
+          await deleteFileFromDB(aid); // Deletes IndexedDB copy, not disk file
       }
-
-      // Remove sources from DB
       for (const sid of allSourceIdsToDelete) {
           await deleteSourceFromDB(sid);
       }
 
-      // Update state
       setSources(prev => prev.filter(s => !allSourceIdsToDelete.has(s.id)));
-      setArticles(prev => prev.filter(a => !articleIdsToDelete.has(a.id)));
+      setArticles(prev => prev.filter(a => !articleIdsToRemove.has(a.id)));
       setCheckedArticleIds(prev => {
           const next = new Set(prev);
-          articleIdsToDelete.forEach(aid => next.delete(aid));
+          articleIdsToRemove.forEach(aid => next.delete(aid));
           return next;
       });
 
       if (activeSourceId && allSourceIdsToDelete.has(activeSourceId)) setActiveSourceId(null);
-      if (selectedArticleId && articleIdsToDelete.has(selectedArticleId)) setSelectedArticleId(null);
+      if (selectedArticleId && articleIdsToRemove.has(selectedArticleId)) setSelectedArticleId(null);
 
     } catch (err) {
       console.error("Failed to delete source", err);
     } finally {
         setIsLoading(false);
-    }
-  };
-
-  const handleSaveSession = () => {
-    const sessionData = {
-      sources,
-      articles,
-      notes,
-      exportedAt: new Date().toISOString()
-    };
-    const blob = new Blob([JSON.stringify(sessionData, null, 2)], { type: 'application/json' });
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement('a');
-    a.href = url;
-    a.download = `librarian_session_${new Date().getTime()}.json`;
-    a.click();
-    URL.revokeObjectURL(url);
-  };
-
-  const handleImportSession = () => {
-    const input = document.createElement('input');
-    input.type = 'file';
-    input.accept = '.json';
-    input.onchange = async (e) => {
-      const file = (e.target as HTMLInputElement).files?.[0];
-      if (!file) return;
-      setIsLoading(true);
-      setLoadingMessage('Importing session...');
-      try {
-        const text = await file.text();
-        const data = JSON.parse(text);
-        if (data.sources && data.articles) {
-          await restoreSession(data.sources, data.articles, data.notes || []);
-          setSources(data.sources);
-          setArticles(data.articles);
-          setNotes(data.notes || []);
-        }
-      } catch (err) {
-        console.error("Import failed", err);
-        alert("Failed to import session file.");
-      } finally {
-        setIsLoading(false);
-      }
-    };
-    input.click();
-  };
-
-  const handleDeleteSelected = async () => {
-    if (checkedArticleIds.size === 0) return;
-    if (!window.confirm(`Are you sure you want to remove ${checkedArticleIds.size} articles from the UI? (Real files will not be touched)`)) return;
-    setIsLoading(true);
-    setLoadingMessage('Removing articles...');
-    try {
-      for (const id of checkedArticleIds) {
-        await deleteArticleFromDB(id);
-        await deleteFileFromDB(id);
-      }
-      setArticles(prev => prev.filter(a => !checkedArticleIds.has(a.id)));
-      setCheckedArticleIds(new Set());
-      if (selectedArticleId && checkedArticleIds.has(selectedArticleId)) {
-        setSelectedArticleId(null);
-      }
-    } catch (err) {
-      console.error("Delete failed", err);
-    } finally {
-      setIsLoading(false);
-    }
-  };
-
-  const handleReplacePdf = async (id: string, file: File) => {
-    setIsLoading(true);
-    setLoadingMessage('Replacing PDF...');
-    try {
-      await saveFileToDB(id, file);
-      setArticles(prev => prev.map(a => a.id === id ? { ...a, fileName: file.name, fileSize: file.size } : a));
-    } catch (err) {
-      console.error("Replace failed", err);
-    } finally {
-      setIsLoading(false);
     }
   };
 
@@ -472,49 +436,12 @@ const LibrarianApp = () => {
     };
     format?: string;
   }) => {
-    const selectedArticles = articles.filter(a => checkedArticleIds.size === 0 ? true : checkedArticleIds.has(a.id));
+    const list = checkedArticleIds.size === 0 ? articles : articles.filter(a => checkedArticleIds.has(a.id));
     
     if (options.references) {
-      const entries = selectedArticles.map(art => {
-        const { key, bib } = generateBibtexData(art);
-        const m = art.metadata!;
-        return {
-          file_path: art.filePath || art.fileName,
-          file_name: art.fileName,
-          title: m.title || "",
-          authors: m.authors || [],
-          year: parseInt(String(m.year)) || null,
-          journal: m.journal || "",
-          volume: m.volume || null,
-          number: m.number || null,
-          doi: m.doi || "",
-          url: m.url || "",
-          bibtex_type: "misc",
-          bibtex_key: key,
-          bibtex: bib
-        };
-      });
-
-      const exportData = {
-        root_path: "Librarian Library",
-        source_parsed_json: "parsed_pdfs.json",
-        generated_at: new Date().toISOString().split('.')[0],
-        bibtex_count: entries.length,
-        entries: entries
-      };
-
-      const blob = new Blob([JSON.stringify(exportData, null, 2)], { type: 'application/json' });
-      const url = URL.createObjectURL(blob);
-      const a = document.createElement('a');
-      a.href = url;
-      a.download = 'bibtex_pdfs.json';
-      a.click();
-      URL.revokeObjectURL(url);
+      handleExportBibtex(list);
     }
-
-    if (options.notes) {
-      alert("Note generation requested. Format: " + options.format);
-    }
+    // Note generation logic would follow here if implemented
   };
 
   const filteredArticles = useMemo(() => {
@@ -557,13 +484,11 @@ const LibrarianApp = () => {
     return [...list];
   }, [articles, activeSourceId, searchQuery, sortConfig, sources]);
 
-  const allCategories = useMemo(() => {
-      const cats = new Set<string>();
-      articles.forEach(a => a.metadata?.categories.forEach(c => cats.add(c)));
-      return Array.from(cats).sort();
-  }, [articles]);
-
-  const selectedArticle = articles.find(a => a.id === selectedArticleId);
+  // Fix: Define selectedArticle to resolve 'Cannot find name selectedArticle' error.
+  const selectedArticle = useMemo(() => 
+    articles.find(a => a.id === selectedArticleId), 
+    [articles, selectedArticleId]
+  );
 
   return (
     <div className="flex h-screen w-screen bg-slate-50 dark:bg-slate-950 font-sans text-slate-900 dark:text-slate-100 overflow-hidden transition-colors duration-200">
@@ -603,13 +528,48 @@ const LibrarianApp = () => {
         onToggleAll={(ids) => setCheckedArticleIds(new Set(ids))}
         searchQuery={searchQuery}
         onSearchChange={setSearchQuery}
-        onSaveSession={handleSaveSession}
-        onImportSession={handleImportSession}
-        onDeleteSelected={handleDeleteSelected}
+        onSaveSession={() => {
+            const blob = new Blob([JSON.stringify({ sources, articles, notes }, null, 2)], { type: 'application/json' });
+            const url = URL.createObjectURL(blob);
+            const a = document.createElement('a');
+            a.href = url;
+            a.download = 'librarian_session.json';
+            a.click();
+            URL.revokeObjectURL(url);
+        }}
+        onImportSession={() => {
+            const input = document.createElement('input');
+            input.type = 'file';
+            input.accept = '.json';
+            input.onchange = async (e) => {
+              const file = (e.target as HTMLInputElement).files?.[0];
+              if (!file) return;
+              try {
+                const text = await file.text();
+                const data = JSON.parse(text);
+                if (data.sources && data.articles) {
+                  await restoreSession(data.sources, data.articles, data.notes || []);
+                  setSources(data.sources); setArticles(data.articles); setNotes(data.notes || []);
+                }
+              } catch (err) { alert("Failed to import session."); }
+            };
+            input.click();
+        }}
+        onDeleteSelected={async () => {
+            if (checkedArticleIds.size === 0 || !window.confirm(`Delete ${checkedArticleIds.size} articles from UI?`)) return;
+            for (const id of checkedArticleIds) {
+                await deleteArticleFromDB(id);
+                await deleteFileFromDB(id);
+            }
+            setArticles(prev => prev.filter(a => !checkedArticleIds.has(a.id)));
+            setCheckedArticleIds(new Set());
+        }}
         isGrouped={isGrouped}
         onToggleGroup={() => setIsGrouped(!isGrouped)}
         sortConfig={sortConfig}
-        onSort={handleSort}
+        onSort={(key) => {
+            setSortConfig(curr => curr?.key === key ? { key, direction: curr.direction === 'asc' ? 'desc' : 'asc' } : { key, direction: 'asc' });
+        }}
       />
 
       <ArticleDetail 
@@ -620,24 +580,47 @@ const LibrarianApp = () => {
         onEditNote={(note) => { setSelectedNote(null); setIsEditingNote(true); setActiveEditorNote(note); }}
         onOpenNote={setSelectedNote}
         onDeleteNote={(id) => { deleteNoteFromDB(id); setNotes(n => n.filter(x => x.id !== id)); if(selectedNote?.id === id) setSelectedNote(null); }}
-        onReplacePdf={handleReplacePdf}
+        onReplacePdf={async (id, file) => {
+            await saveFileToDB(id, file);
+            setArticles(prev => prev.map(a => a.id === id ? { ...a, fileName: file.name, fileSize: file.size } : a));
+        }}
       />
 
-      <button onClick={() => checkedArticleIds.size === 1 ? (() => { const aid = Array.from(checkedArticleIds)[0]; const art = articles.find(a => a.id === aid); setSelectedNote(null); setIsEditingNote(false); setActiveEditorNote({ type: 'article', targetId: aid, content: '', title: `Notes on ${art?.metadata?.title || art?.fileName}` }); })() : setIsNotebookSetupOpen(true)} className="fixed bottom-6 right-6 z-[40] p-4 bg-indigo-600 hover:bg-indigo-700 text-white rounded-full shadow-lg transition-transform hover:scale-110 active:scale-95 flex items-center justify-center" title="Open Notebook">
+      <button onClick={() => {
+          if (checkedArticleIds.size === 1) {
+              const aid = Array.from(checkedArticleIds)[0];
+              const art = articles.find(a => a.id === aid);
+              setSelectedNote(null); setIsEditingNote(false);
+              setActiveEditorNote({ type: 'article', targetId: aid, content: '', title: `Notes on ${art?.metadata?.title || art?.fileName}` });
+          } else setIsNotebookSetupOpen(true);
+      }} className="fixed bottom-6 right-6 z-[40] p-4 bg-indigo-600 hover:bg-indigo-700 text-white rounded-full shadow-lg transition-transform hover:scale-110 active:scale-95 flex items-center justify-center">
         <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z" /></svg>
       </button>
 
       <SettingsModal isOpen={isSettingsOpen} onClose={() => setIsSettingsOpen(false)} currentTheme={theme} onThemeChange={setTheme} />
-      <NotebookModal isOpen={isNotebookSetupOpen} onClose={() => setIsNotebookSetupOpen(false)} articles={articles} categories={allCategories} onConfirm={(type, tid) => { setIsEditingNote(false); setActiveEditorNote({ type, targetId: tid, content: '', title: type === 'article' ? `Notes on ${articles.find(a => a.id === tid)?.metadata?.title || 'Article'}` : 'New Note' }); }} />
+      <NotebookModal isOpen={isNotebookSetupOpen} onClose={() => setIsNotebookSetupOpen(false)} articles={articles} categories={useMemo(() => Array.from(new Set(articles.flatMap(a => a.metadata?.categories || []))).sort(), [articles])} onConfirm={(type, tid) => { setIsEditingNote(false); setActiveEditorNote({ type, targetId: tid, content: '', title: type === 'article' ? `Notes on ${articles.find(a => a.id === tid)?.metadata?.title || 'Article'}` : 'New Note' }); }} />
       <AddSourceModal isOpen={isAddSourceModalOpen} onClose={() => setIsAddSourceModalOpen(false)} onAddSource={handleAddSource} onAddPDF={handleAddPDF} />
       <GenerateModal isOpen={isGenerateModalOpen} onClose={() => setIsGenerateModalOpen(false)} onConfirm={handleGenerateConfirm} />
-      {activeEditorNote && <NotebookEditor isOpen={!!activeEditorNote} initialData={activeEditorNote} onClose={() => setActiveEditorNote(null)} onSave={async (nd) => { let nn: Note; if(isEditingNote && nd.id) { nn = { ...notes.find(x => x.id === nd.id)!, ...nd } as Note; } else { nn = { id: crypto.randomUUID(), createdAt: Date.now(), title: nd.title || 'Untitled', content: nd.content || '', type: nd.type || 'general', targetId: nd.targetId }; } await saveNoteToDB(nn); setNotes(prev => isEditingNote ? prev.map(x => x.id === nn.id ? nn : x) : [...prev, nn]); if(selectedNote?.id === nn.id) setSelectedNote(nn); }} isEditing={isEditingNote} />}
-      <NoteViewerModal note={selectedNote} onClose={() => setSelectedNote(null)} onUpdateTitle={(id, t) => { const idx = notes.findIndex(x => x.id === id); if(idx !== -1) { const un = { ...notes[idx], title: t }; saveNoteToDB(un); setNotes(n => n.map(x => x.id === id ? un : x)); if(selectedNote?.id === id) setSelectedNote(un); } }} onDelete={(id) => { deleteNoteFromDB(id); setNotes(n => n.filter(x => x.id !== id)); setSelectedNote(null); }} onEdit={(n) => { setSelectedNote(null); setIsEditingNote(true); setActiveEditorNote(n); }} />
+      {activeEditorNote && <NotebookEditor isOpen={!!activeEditorNote} initialData={activeEditorNote} onClose={() => setActiveEditorNote(null)} onSave={async (nd) => {
+          let nn: Note;
+          if(isEditingNote && nd.id) nn = { ...notes.find(x => x.id === nd.id)!, ...nd } as Note;
+          else nn = { id: crypto.randomUUID(), createdAt: Date.now(), title: nd.title || 'Untitled', content: nd.content || '', type: nd.type || 'general', targetId: nd.targetId };
+          await saveNoteToDB(nn);
+          setNotes(prev => isEditingNote ? prev.map(x => x.id === nn.id ? nn : x) : [...prev, nn]);
+      }} isEditing={isEditingNote} />}
+      <NoteViewerModal note={selectedNote} onClose={() => setSelectedNote(null)} onUpdateTitle={(id, t) => {
+          const note = notes.find(n => n.id === id);
+          if (note) {
+              const updated = { ...note, title: t };
+              saveNoteToDB(updated);
+              setNotes(prev => prev.map(x => x.id === id ? updated : x));
+          }
+      }} onDelete={(id) => { deleteNoteFromDB(id); setNotes(n => n.filter(x => x.id !== id)); setSelectedNote(null); }} onEdit={(n) => { setSelectedNote(null); setIsEditingNote(true); setActiveEditorNote(n); }} />
     </div>
   );
 };
 
 const App = () => (
-  <Suspense fallback={<div className="h-screen w-screen flex items-center justify-center bg-slate-50 text-slate-500 italic">Initializing Librarian...</div>}><LibrarianApp /></Suspense>
+  <Suspense fallback={<div className="h-screen w-screen flex items-center justify-center bg-slate-50 text-slate-500 italic">Initializing...</div>}><LibrarianApp /></Suspense>
 );
 createRoot(document.getElementById('root')!).render(<App />);
