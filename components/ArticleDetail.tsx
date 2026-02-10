@@ -1,3 +1,4 @@
+
 import React, { useState, useEffect } from 'react';
 import ReactMarkdown from 'react-markdown';
 import { Article, ArticleMetadata, Note } from '../types';
@@ -13,6 +14,30 @@ interface ArticleDetailProps {
   onDeleteNote: (id: string) => void;
   onReplacePdf: (id: string, file: File) => Promise<void>;
 }
+
+// Helper duplicated from index.tsx for scoping here
+const generateBibtexData = (art: Article) => {
+  const m = art.metadata!;
+  const year = m.year || "0000";
+  const authors = m.authors || [];
+  const firstAuthorRaw = authors[0] || "anon";
+  const lastName = firstAuthorRaw.split(' ').pop()?.toLowerCase().replace(/[^a-z0-9]/g, '') || "anon";
+  const titleWords = m.title.split(' ').filter(w => w.length > 3);
+  const firstTitleWord = (titleWords[0] || "entry").toLowerCase().replace(/[^a-z0-9]/g, '');
+  const key = `${lastName}${year}${firstTitleWord}`;
+  
+  const authorsStr = authors.join(' and ');
+  let bib = `@misc{${key},\n`;
+  if (authorsStr) bib += `  author = {${authorsStr}},\n`;
+  bib += `  title = {${m.title}},\n`;
+  bib += `  year = {${year}},\n`;
+  bib += `  howpublished = {PDF},\n`;
+  bib += `  note = {Local PDF: ${art.fileName}},\n`;
+  bib += `  file = {${art.filePath || art.fileName}}\n`;
+  bib += `}`;
+  
+  return { key, bib };
+};
 
 export const ArticleDetail: React.FC<ArticleDetailProps> = ({ 
   article, notes = [], onClose, onUpdateMetadata, onEditNote, onOpenNote, onDeleteNote, onReplacePdf
@@ -49,6 +74,43 @@ export const ArticleDetail: React.FC<ArticleDetailProps> = ({
   if (!article) return <div className={`fixed inset-y-0 right-0 w-[450px] bg-white dark:bg-slate-900 shadow-2xl transform transition-transform duration-300 ease-in-out border-l border-slate-200 dark:border-slate-800 flex flex-col z-20 translate-x-full`}></div>;
 
   const articleNotes = notes.filter(n => n.type === 'article' && n.targetId === article.id);
+
+  const handleExportCitation = () => {
+    const { key, bib } = generateBibtexData(article);
+    const m = article.metadata!;
+    
+    const entry = {
+      file_path: article.filePath || article.fileName,
+      file_name: article.fileName,
+      title: m.title || "",
+      authors: m.authors || [],
+      year: parseInt(String(m.year)) || null,
+      journal: m.journal || "",
+      volume: m.volume || null,
+      number: m.number || null,
+      doi: m.doi || "",
+      url: m.url || "",
+      bibtex_type: "misc",
+      bibtex_key: key,
+      bibtex: bib
+    };
+
+    const exportData = {
+      root_path: "Librarian Library",
+      source_parsed_json: "parsed_pdfs.json",
+      generated_at: new Date().toISOString().split('.')[0],
+      bibtex_count: 1,
+      entries: [entry]
+    };
+
+    const blob = new Blob([JSON.stringify(exportData, null, 2)], { type: 'application/json' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = 'bibtex_pdfs.json';
+    a.click();
+    URL.revokeObjectURL(url);
+  };
 
   return (
     <div className={`fixed inset-y-0 right-0 ${pdfUrl ? 'w-[90vw] md:w-[85vw]' : 'w-[450px]'} bg-white dark:bg-slate-900 shadow-2xl transform transition-all duration-300 ease-in-out border-l border-slate-200 dark:border-slate-800 flex flex-col z-20 translate-x-0`}>
@@ -88,7 +150,12 @@ export const ArticleDetail: React.FC<ArticleDetailProps> = ({
                     </div>
                 </header>
                 <section><h4 className="text-xs font-bold text-slate-400 dark:text-slate-500 uppercase tracking-widest mb-3">Labels</h4><div className="flex flex-wrap gap-2 mb-2">{article.metadata?.categories?.map(cat => (<span key={cat} className="group px-2.5 py-1 bg-indigo-50 dark:bg-indigo-900/40 text-indigo-700 dark:text-indigo-300 text-xs font-semibold rounded-md border border-indigo-100 dark:border-indigo-800 flex items-center gap-1">{cat}<button onClick={() => onUpdateMetadata(article.id, { categories: article.metadata?.categories.filter(x => x !== cat) })} className="opacity-0 group-hover:opacity-100 transition-opacity">×</button></span>))}</div><input type="text" className="text-xs w-full px-2 py-1 border border-slate-200 dark:border-slate-700 rounded bg-white dark:bg-slate-800 text-slate-900 dark:text-slate-200" placeholder="+ Add Label" onKeyDown={(e) => { if(e.key === 'Enter' && e.currentTarget.value.trim()) { onUpdateMetadata(article.id, { categories: [...(article.metadata?.categories || []), e.currentTarget.value.trim()] }); e.currentTarget.value = ''; }}} /></section>
-                <div className="pt-8 border-t border-slate-100 dark:border-slate-800 space-y-3"><button onClick={async () => { setIsLoadingPdf(true); const b = await getFileFromDB(article.id); if(b) setPdfUrl(URL.createObjectURL(b)); setIsLoadingPdf(false); }} disabled={isLoadingPdf} className="w-full py-3 bg-slate-900 dark:bg-indigo-600 text-white font-bold rounded-lg transition-all shadow-md flex items-center justify-center gap-2">{isLoadingPdf ? "Loading..." : pdfUrl ? "Close Reader" : "Read PDF"}</button></div>
+                <div className="pt-8 border-t border-slate-100 dark:border-slate-800 space-y-3">
+                  <div className="flex gap-2">
+                    <button onClick={handleExportCitation} className="flex-1 py-2 text-sm bg-slate-100 dark:bg-slate-800 text-slate-700 dark:text-slate-300 font-medium rounded hover:bg-slate-200 transition-colors border border-slate-200 dark:border-slate-700">Export Citation</button>
+                    <button onClick={async () => { setIsLoadingPdf(true); const b = await getFileFromDB(article.id); if(b) setPdfUrl(URL.createObjectURL(b)); setIsLoadingPdf(false); }} disabled={isLoadingPdf} className="flex-1 py-2 bg-slate-900 dark:bg-indigo-600 text-white font-bold rounded transition-all shadow-md">{isLoadingPdf ? "Loading..." : "Read PDF"}</button>
+                  </div>
+                </div>
                 </div>
             </div>
             {pdfUrl && (<div className="flex-1 bg-slate-200 dark:bg-slate-800 h-full relative flex flex-col"><iframe src={pdfUrl} className="w-full h-full border-none" title="PDF Viewer" /></div>)}

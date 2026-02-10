@@ -6,6 +6,8 @@ export interface ArticleMetadata {
   volume?: string;
   number?: string | number | null; // Issue number
   year: string;
+  doi?: string;
+  url?: string;
   categories: string[];
   keywords: string[];
   abstract: string;
