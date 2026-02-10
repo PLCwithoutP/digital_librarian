@@ -16,7 +16,7 @@ interface SidebarProps {
   onOpenSettings: () => void;
   onOpenNote: (note: Note) => void;
   onDeleteSource: (id: string) => void;
-  onExportMetadata: () => void;
+  onExportMetadata: (targetArticles?: Article[]) => void;
   isGenerateDisabled: boolean;
 }
 
@@ -28,10 +28,23 @@ const SourceTreeItem: React.FC<{
   depth: number;
   onSelect: (id: string) => void;
   onDelete: (id: string) => void;
-}> = ({ source, allSources, articles, activeSourceId, depth, onSelect, onDelete }) => {
+  onExport: (targetArticles: Article[]) => void;
+}> = ({ source, allSources, articles, activeSourceId, depth, onSelect, onDelete, onExport }) => {
   const [isExpanded, setIsExpanded] = useState(true);
   const children = allSources.filter(s => s.parentId === source.id);
   const hasChildren = children.length > 0;
+  
+  // Get articles for this source AND all its descendants
+  const getDescendantSourceIds = (sid: string): string[] => {
+    let ids = [sid];
+    allSources.filter(s => s.parentId === sid).forEach(child => {
+      ids = [...ids, ...getDescendantSourceIds(child.id)];
+    });
+    return ids;
+  };
+  
+  const descendantIds = getDescendantSourceIds(source.id);
+  const sourceArticles = articles.filter(a => descendantIds.includes(a.sourceId));
   const directArticleCount = articles.filter(a => a.sourceId === source.id).length;
 
   return (
@@ -43,11 +56,42 @@ const SourceTreeItem: React.FC<{
           </div>
           <svg className="w-4 h-4 shrink-0 text-slate-500" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M3 7v10a2 2 0 002 2h14a2 2 0 002-2V9a2 2 0 00-2-2h-6l-2-2H5a2 2 0 00-2 2z" /></svg>
           <span className="truncate text-sm ml-1 select-none">{source.name}</span>
-          <span className="text-[10px] bg-slate-700 px-1.5 py-0.5 rounded-full ml-auto mr-2">{directArticleCount}</span>
+          <span className="text-[10px] bg-slate-700 px-1.5 py-0.5 rounded-full ml-auto mr-1">{directArticleCount}</span>
         </div>
-        <button onClick={(e) => { e.stopPropagation(); onDelete(source.id); }} className="p-2 text-slate-500 hover:text-red-400 opacity-0 group-hover:opacity-100 transition-opacity"><svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" /></svg></button>
+        <div className="flex items-center opacity-0 group-hover:opacity-100 transition-opacity pr-1">
+          <button 
+            onClick={(e) => { e.stopPropagation(); onExport(sourceArticles); }} 
+            className="p-1.5 text-slate-400 hover:text-indigo-400 transition-colors"
+            title="Export metadata.json for this folder"
+          >
+            <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-8l-4-4m0 0L8 8m4-4v12" /></svg>
+          </button>
+          <button 
+            onClick={(e) => { e.stopPropagation(); onDelete(source.id); }} 
+            className="p-1.5 text-slate-400 hover:text-red-400 transition-colors"
+            title="Remove folder from view"
+          >
+            <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" /></svg>
+          </button>
+        </div>
       </div>
-      {isExpanded && hasChildren && (<div>{children.map(child => (<SourceTreeItem key={child.id} source={child} allSources={allSources} articles={articles} activeSourceId={activeSourceId} depth={depth + 1} onSelect={onSelect} onDelete={onDelete} />))}</div>)}
+      {isExpanded && hasChildren && (
+        <div>
+          {children.map(child => (
+            <SourceTreeItem 
+              key={child.id} 
+              source={child} 
+              allSources={allSources} 
+              articles={articles} 
+              activeSourceId={activeSourceId} 
+              depth={depth + 1} 
+              onSelect={onSelect} 
+              onDelete={onDelete} 
+              onExport={onExport}
+            />
+          ))}
+        </div>
+      )}
     </div>
   );
 };
@@ -74,7 +118,17 @@ export const Sidebar: React.FC<SidebarProps> = ({
         </button>
         <div className="mt-4">
           {rootSources.map(source => (
-            <SourceTreeItem key={source.id} source={source} allSources={sources} articles={articles} activeSourceId={activeSourceId} depth={0} onSelect={onSetActiveSource} onDelete={onDeleteSource} />
+            <SourceTreeItem 
+              key={source.id} 
+              source={source} 
+              allSources={sources} 
+              articles={articles} 
+              activeSourceId={activeSourceId} 
+              depth={0} 
+              onSelect={onSetActiveSource} 
+              onDelete={onDeleteSource}
+              onExport={onExportMetadata}
+            />
           ))}
         </div>
 
@@ -113,7 +167,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
       </nav>
       <div className="p-4 border-t border-slate-800 space-y-2">
         <button onClick={onOpenAddModal} className="flex items-center justify-center gap-2 w-full bg-indigo-600 hover:bg-indigo-700 text-white font-medium py-2 rounded-lg transition-colors shadow-lg"><svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4v16m8-8H4" /></svg>Add</button>
-        <button onClick={onExportMetadata} className="flex items-center justify-center gap-2 w-full bg-slate-800 hover:bg-slate-700 text-slate-300 font-medium py-2 rounded-lg transition-colors border border-slate-700" title="Export parsed_pdfs.json"><svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-8l-4-4m0 0L8 8m4-4v12" /></svg>Export Metadata</button>
+        <button onClick={() => onExportMetadata()} className="flex items-center justify-center gap-2 w-full bg-slate-800 hover:bg-slate-700 text-slate-300 font-medium py-2 rounded-lg transition-colors border border-slate-700" title="Export metadata.json"><svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-8l-4-4m0 0L8 8m4-4v12" /></svg>Export Metadata</button>
         <button onClick={onOpenGenerateModal} disabled={isGenerateDisabled} className={`flex items-center justify-center gap-2 w-full font-medium py-2 rounded-lg transition-colors shadow-lg ${isGenerateDisabled ? 'bg-slate-800 text-slate-600 cursor-not-allowed' : 'bg-emerald-600 hover:bg-emerald-700 text-white'}`}><svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 10V3L4 14h7v7l9-11h-7z" /></svg>Generate</button>
         <div className="grid grid-cols-1 pt-2 border-t border-slate-700/50"><button onClick={onOpenSettings} className="flex items-center justify-center gap-2 w-full bg-slate-800 hover:bg-slate-700 text-slate-300 hover:text-white font-medium py-2 rounded-lg transition-colors border border-slate-700"><svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.065 2.572c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.572 1.065c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.065-2.572c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z" /><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" /></svg>Settings</button></div>
       </div>

@@ -1,4 +1,3 @@
-
 import React, { useState, useEffect, useMemo, Suspense } from 'react';
 import { createRoot } from 'react-dom/client';
 import { Article, Source, ArticleMetadata, Note, NoteType } from './types';
@@ -112,10 +111,11 @@ const LibrarianApp = () => {
     return Array.from(set).sort();
   }, [articles]);
 
-  const handleExportMetadata = (targetArticles?: Article[], fileName: string = 'parsed_pdfs.json') => {
-    const list = targetArticles || articles;
+  const handleExportMetadata = (targetArticles?: Article[], fileName: string = 'metadata.json') => {
+    const list = targetArticles || (activeSourceId || activeCategoryId || searchQuery ? filteredArticles : articles);
+    
     if (list.length === 0) {
-      alert("No articles to export.");
+      alert("No articles to export metadata for.");
       return;
     }
 
@@ -160,10 +160,11 @@ const LibrarianApp = () => {
   };
 
   const processMetadataFiles = async (files: File[]): Promise<Map<string, any>> => {
-      const jsonFiles = files.filter(f => f.name.toLowerCase().endsWith('.json'));
+      // Specifically look for metadata.json in the file list
+      const metadataFiles = files.filter(f => f.name.toLowerCase() === 'metadata.json');
       const pdfMetadataMap = new Map<string, any>();
 
-      for (const jsonFile of jsonFiles) {
+      for (const jsonFile of metadataFiles) {
           try {
               const text: string = await jsonFile.text();
               const data = JSON.parse(text);
@@ -172,6 +173,7 @@ const LibrarianApp = () => {
                       if (pdf.file_name) pdfMetadataMap.set(pdf.file_name, pdf);
                   });
               }
+              // Legacy support for 'entries' key if used previously
               if (data.entries && Array.isArray(data.entries)) {
                   data.entries.forEach((entry: any) => {
                       if (entry.file_name) {
@@ -235,8 +237,6 @@ const LibrarianApp = () => {
         const pdfMetadataMap = await processMetadataFiles(fileList);
         const newArticles: Article[] = [];
 
-        const hasExistingMetadata = fileList.some(f => f.name.toLowerCase() === 'parsed_pdfs.json');
-
         const getOrCreateSource = (fullPath: string, folderName: string, parentPath: string | null): string => {
             if (pathSourceIdMap.has(fullPath)) return pathSourceIdMap.get(fullPath)!;
             const id = crypto.randomUUID();
@@ -296,9 +296,9 @@ const LibrarianApp = () => {
         setSources(prev => [...prev, ...newSources]);
         setArticles(prev => [...prev, ...newArticles]);
         
-        if (newArticles.length > 0 && !hasExistingMetadata) {
-            handleExportMetadata(newArticles, 'parsed_pdfs.json');
-        }
+        // Removed: handleExportMetadata(newArticles, 'metadata.json');
+        // Users now manually export to "create" the file if needed.
+        
     } catch (err) {
         console.error("Folder import failed", err);
         alert("Failed to import folder.");
@@ -391,7 +391,7 @@ const LibrarianApp = () => {
       setSources(prev => prev.filter(s => !allSourceIdsToDelete.has(s.id)));
       setArticles(prev => prev.filter(a => !articleIdsToRemove.has(a.id)));
       setCheckedArticleIds(prev => {
-          const next = new Set(prev);
+          const next = new Set<string>(prev);
           articleIdsToRemove.forEach(aid => next.delete(aid));
           return next;
       });
@@ -565,14 +565,16 @@ const LibrarianApp = () => {
         categories={categories}
         activeSourceId={activeSourceId}
         activeCategoryId={activeCategoryId}
-        onSetActiveSource={(id) => { setActiveSourceId(id); setActiveCategoryId(null); }}
-        onSetActiveCategory={(cat) => { setActiveCategoryId(cat); setActiveSourceId(null); }}
+        // Fix inferred "unknown" type errors by providing explicit callback parameter types.
+        onSetActiveSource={(id: string | null) => { setActiveSourceId(id); setActiveCategoryId(null); }}
+        onSetActiveCategory={(cat: string | null) => { setActiveCategoryId(cat); setActiveSourceId(null); }}
         onOpenAddModal={() => setIsAddSourceModalOpen(true)}
         onOpenGenerateModal={() => setIsGenerateModalOpen(true)}
         onOpenSettings={() => setIsSettingsOpen(true)}
-        onOpenNote={(note) => setSelectedNote(note)}
+        onOpenNote={(note: Note) => setSelectedNote(note)}
         onDeleteSource={handleDeleteSource}
-        onExportMetadata={() => handleExportMetadata()}
+        // Fix inferred "unknown" type error for targetArticles by providing explicit type.
+        onExportMetadata={(targetArticles?: Article[]) => handleExportMetadata(targetArticles, 'metadata.json')}
         isGenerateDisabled={articles.length === 0}
       />
 
@@ -581,7 +583,6 @@ const LibrarianApp = () => {
         selectedArticleId={selectedArticleId}
         onSelectArticle={(id: string) => setSelectedArticleId(id)}
         checkedArticleIds={checkedArticleIds}
-        // Explicitly type 'id' to fix "Argument of type 'unknown' is not assignable to parameter of type 'string'" errors on lines 384-385.
         onToggleArticle={(id: string) => setCheckedArticleIds(prev => {
             const next = new Set<string>(prev);
             if (next.has(id)) next.delete(id);
@@ -628,7 +629,7 @@ const LibrarianApp = () => {
                 await deleteFileFromDB(id);
             }
             setArticles(prev => prev.filter(a => !checkedArticleIds.has(a.id)));
-            setCheckedArticleIds(new Set());
+            setCheckedArticleIds(new Set<string>());
         }}
         isGrouped={isGrouped}
         onToggleGroup={() => setIsGrouped(!isGrouped)}
@@ -645,7 +646,7 @@ const LibrarianApp = () => {
         onUpdateMetadata={handleUpdateArticle}
         onEditNote={(note) => { 
           setSelectedNote(null); 
-          setIsEditingNote(!!note.id); // It's an edit only if an ID exists
+          setIsEditingNote(!!note.id);
           setActiveEditorNote(note); 
         }}
         onOpenNote={setSelectedNote}
