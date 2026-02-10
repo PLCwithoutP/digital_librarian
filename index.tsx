@@ -416,10 +416,86 @@ const LibrarianApp = () => {
     };
     format?: string;
   }) => {
-    const list = checkedArticleIds.size === 0 ? articles : articles.filter(a => checkedArticleIds.has(a.id));
+    const isSomethingChecked = checkedArticleIds.size > 0;
+    const list = !isSomethingChecked ? articles : articles.filter(a => checkedArticleIds.has(a.id));
     
     if (options.references) {
       handleExportBibtex(list);
+    }
+
+    if (options.notes) {
+      const ext = options.format || '.md';
+      let content = '';
+      const now = new Date().toLocaleString();
+
+      if (ext === '.md') {
+        content = `# Librarian Notes Export\nGenerated on ${now}\n\n`;
+        
+        if (options.notesOptions.general) {
+          const gen = notes.filter(n => n.type === 'general');
+          if (gen.length) {
+            content += `## General Notes\n\n`;
+            gen.forEach(n => content += `### ${n.title}\n${n.content}\n\n---\n\n`);
+          }
+        }
+
+        if (options.notesOptions.category) {
+          const cat = notes.filter(n => n.type === 'category');
+          if (cat.length) {
+            content += `## Category Notes\n\n`;
+            cat.forEach(n => content += `### Category: ${n.targetId} - ${n.title}\n${n.content}\n\n---\n\n`);
+          }
+        }
+
+        if (options.notesOptions.article && isSomethingChecked) {
+          const artNotes = notes.filter(n => n.type === 'article' && checkedArticleIds.has(n.targetId!));
+          if (artNotes.length) {
+            content += `## Article Notes\n\n`;
+            artNotes.forEach(n => {
+              const art = articles.find(a => a.id === n.targetId);
+              content += `### ${art?.metadata?.title || art?.fileName} - ${n.title}\n${n.content}\n\n---\n\n`;
+            });
+          }
+        }
+      } else if (ext === '.tex') {
+        content = `% Librarian Notes Export\n% Generated on ${now}\n\n\\documentclass{article}\n\\usepackage[utf8]{inputenc}\n\\begin{document}\n\\title{Librarian Notes Export}\n\\maketitle\n\n`;
+        
+        if (options.notesOptions.general) {
+          const gen = notes.filter(n => n.type === 'general');
+          if (gen.length) {
+            content += `\\section{General Notes}\n`;
+            gen.forEach(n => content += `\\subsection{${n.title}}\n${n.content}\n\n`);
+          }
+        }
+
+        if (options.notesOptions.category) {
+          const cat = notes.filter(n => n.type === 'category');
+          if (cat.length) {
+            content += `\\section{Category Notes}\n`;
+            cat.forEach(n => content += `\\subsection{Category: ${n.targetId} - ${n.title}}\n${n.content}\n\n`);
+          }
+        }
+
+        if (options.notesOptions.article && isSomethingChecked) {
+          const artNotes = notes.filter(n => n.type === 'article' && checkedArticleIds.has(n.targetId!));
+          if (artNotes.length) {
+            content += `\\section{Article Notes}\n`;
+            artNotes.forEach(n => {
+              const art = articles.find(a => a.id === n.targetId);
+              content += `\\subsection{${art?.metadata?.title || art?.fileName} - ${n.title}}\n${n.content}\n\n`;
+            });
+          }
+        }
+        content += `\\end{document}`;
+      }
+
+      const blob = new Blob([content], { type: 'text/plain' });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = `librarian_notes_${Date.now()}${ext}`;
+      a.click();
+      URL.revokeObjectURL(url);
     }
   };
 
@@ -503,15 +579,16 @@ const LibrarianApp = () => {
       <ArticleList 
         articles={filteredArticles}
         selectedArticleId={selectedArticleId}
-        onSelectArticle={setSelectedArticleId}
+        onSelectArticle={(id: string) => setSelectedArticleId(id)}
         checkedArticleIds={checkedArticleIds}
-        onToggleArticle={(id) => setCheckedArticleIds(prev => {
-            const next = new Set(prev);
+        // Explicitly type 'id' to fix "Argument of type 'unknown' is not assignable to parameter of type 'string'" errors on lines 384-385.
+        onToggleArticle={(id: string) => setCheckedArticleIds(prev => {
+            const next = new Set<string>(prev);
             if (next.has(id)) next.delete(id);
             else next.add(id);
             return next;
         })}
-        onToggleAll={(ids) => setCheckedArticleIds(new Set(ids))}
+        onToggleAll={(ids: string[]) => setCheckedArticleIds(new Set<string>(ids))}
         searchQuery={searchQuery}
         onSearchChange={setSearchQuery}
         onSaveSession={() => {
@@ -531,16 +608,15 @@ const LibrarianApp = () => {
               const file = (e.target as HTMLInputElement).files?.[0];
               if (!file) return;
               try {
-                // Fix for line 384 and 385: Explicitly cast the result of file.text() to string
-                // to avoid "unknown" type errors during assignment and when passed to JSON.parse.
-                const text = await file.text() as string;
+                const text = await file.text();
                 const data = JSON.parse(text);
                 if (data.sources && data.articles) {
                   await restoreSession(data.sources, data.articles, data.notes || []);
                   setSources(data.sources); setArticles(data.articles); setNotes(data.notes || []);
                 }
               } catch (err) { 
-                alert(err instanceof Error ? err.message : "Failed to import session."); 
+                const errorMsg = err instanceof Error ? err.message : String(err);
+                alert(errorMsg || "Failed to import session."); 
               }
             };
             input.click();
@@ -567,7 +643,11 @@ const LibrarianApp = () => {
         notes={notes}
         onClose={() => setSelectedArticleId(null)}
         onUpdateMetadata={handleUpdateArticle}
-        onEditNote={(note) => { setSelectedNote(null); setIsEditingNote(true); setActiveEditorNote(note); }}
+        onEditNote={(note) => { 
+          setSelectedNote(null); 
+          setIsEditingNote(!!note.id); // It's an edit only if an ID exists
+          setActiveEditorNote(note); 
+        }}
         onOpenNote={setSelectedNote}
         onDeleteNote={(id) => { deleteNoteFromDB(id); setNotes(n => n.filter(x => x.id !== id)); if(selectedNote?.id === id) setSelectedNote(null); }}
         onReplacePdf={async (id, file) => {
@@ -580,7 +660,8 @@ const LibrarianApp = () => {
           if (checkedArticleIds.size === 1) {
               const aid = Array.from(checkedArticleIds)[0];
               const art = articles.find(a => a.id === aid);
-              setSelectedNote(null); setIsEditingNote(false);
+              setSelectedNote(null); 
+              setIsEditingNote(false);
               setActiveEditorNote({ type: 'article', targetId: aid, content: '', title: `Notes on ${art?.metadata?.title || art?.fileName}` });
           } else setIsNotebookSetupOpen(true);
       }} className="fixed bottom-6 right-6 z-[40] p-4 bg-indigo-600 hover:bg-indigo-700 text-white rounded-full shadow-lg transition-transform hover:scale-110 active:scale-95 flex items-center justify-center">
@@ -593,10 +674,33 @@ const LibrarianApp = () => {
       <GenerateModal isOpen={isGenerateModalOpen} onClose={() => setIsGenerateModalOpen(false)} onConfirm={handleGenerateConfirm} />
       {activeEditorNote && <NotebookEditor isOpen={!!activeEditorNote} initialData={activeEditorNote} onClose={() => setActiveEditorNote(null)} onSave={async (nd) => {
           let nn: Note;
-          if(isEditingNote && nd.id) nn = { ...notes.find(x => x.id === nd.id)!, ...nd } as Note;
-          else nn = { id: crypto.randomUUID(), createdAt: Date.now(), title: nd.title || 'Untitled', content: nd.content || '', type: nd.type || 'general', targetId: nd.targetId };
+          const isActuallyEditing = !!nd.id;
+          
+          if(isActuallyEditing) {
+            const existing = notes.find(x => x.id === nd.id);
+            nn = { ...existing!, ...nd } as Note;
+          } else {
+            nn = { 
+              id: crypto.randomUUID(), 
+              createdAt: Date.now(), 
+              title: nd.title || 'Untitled', 
+              content: nd.content || '', 
+              type: nd.type as NoteType || 'general', 
+              targetId: nd.targetId 
+            };
+          }
+          
           await saveNoteToDB(nn);
-          setNotes(prev => isEditingNote ? prev.map(x => x.id === nn.id ? nn : x) : [...prev, nn]);
+          
+          setNotes(prev => {
+            const index = prev.findIndex(x => x.id === nn.id);
+            if (index !== -1) {
+              const next = [...prev];
+              next[index] = nn;
+              return next;
+            }
+            return [...prev, nn];
+          });
       }} isEditing={isEditingNote} />}
       <NoteViewerModal note={selectedNote} onClose={() => setSelectedNote(null)} onUpdateTitle={(id, t) => {
           const note = notes.find(n => n.id === id);

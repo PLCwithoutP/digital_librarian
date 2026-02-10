@@ -138,6 +138,25 @@ export const ArticleDetail: React.FC<ArticleDetailProps> = ({
     URL.revokeObjectURL(url);
   };
 
+  const handleExportNotes = () => {
+    if (!articleNotes.length) {
+      alert("No notes found for this article.");
+      return;
+    }
+    const title = article.metadata?.title || article.fileName;
+    let content = `# Notes for: ${title}\n\n`;
+    articleNotes.forEach(n => {
+      content += `## ${n.title}\n*Created: ${new Date(n.createdAt).toLocaleDateString()}*\n\n${n.content}\n\n---\n\n`;
+    });
+    const blob = new Blob([content], { type: 'text/plain' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `${title.slice(0, 30).replace(/[^a-z0-9]/gi, '_')}_notes.md`;
+    a.click();
+    URL.revokeObjectURL(url);
+  };
+
   const handleAddCategory = () => {
     if (!newCategory.trim()) return;
     const current = article.metadata?.categories || [];
@@ -269,7 +288,10 @@ export const ArticleDetail: React.FC<ArticleDetailProps> = ({
                     </div>
 
                     <div className="pt-8 border-t border-slate-100 dark:border-slate-800 space-y-4">
-                        <button onClick={handleExportCitation} className="w-full py-2 text-sm bg-slate-100 dark:bg-slate-800 text-slate-700 dark:text-slate-300 font-medium rounded hover:bg-slate-200 border border-slate-200 dark:border-slate-700 transition-colors">Export Citation (.bib)</button>
+                        <div className="grid grid-cols-2 gap-2">
+                          <button onClick={handleExportCitation} className="py-2 text-xs bg-slate-100 dark:bg-slate-800 text-slate-700 dark:text-slate-300 font-medium rounded hover:bg-slate-200 border border-slate-200 dark:border-slate-700 transition-colors">Export Citation (.bib)</button>
+                          <button onClick={handleExportNotes} className="py-2 text-xs bg-slate-100 dark:bg-slate-800 text-slate-700 dark:text-slate-300 font-medium rounded hover:bg-slate-200 border border-slate-200 dark:border-slate-700 transition-colors">Export Notes (.md)</button>
+                        </div>
                         <button onClick={async () => { setIsLoadingPdf(true); const b = await getFileFromDB(article.id); if(b) setPdfUrl(URL.createObjectURL(b)); setIsLoadingPdf(false); }} disabled={isLoadingPdf} className="w-full py-3 bg-indigo-600 text-white font-bold rounded-lg shadow-md">{isLoadingPdf ? "Loading..." : "Read PDF"}</button>
                     </div>
 
