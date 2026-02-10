@@ -55,6 +55,7 @@ const LibrarianApp = () => {
   const [selectedArticleId, setSelectedArticleId] = useState<string | null>(null);
   const [searchQuery, setSearchQuery] = useState('');
   const [activeSourceId, setActiveSourceId] = useState<string | null>(null);
+  const [activeCategoryId, setActiveCategoryId] = useState<string | null>(null);
   const [isGrouped, setIsGrouped] = useState(false);
   const [sortConfig, setSortConfig] = useState<{ key: string; direction: 'asc' | 'desc' } | null>(null);
   const [checkedArticleIds, setCheckedArticleIds] = useState<Set<string>>(new Set());
@@ -105,6 +106,12 @@ const LibrarianApp = () => {
     initSession();
   }, []);
 
+  const categories = useMemo(() => {
+    const set = new Set<string>();
+    articles.forEach(a => a.metadata?.categories.forEach(c => set.add(c)));
+    return Array.from(set).sort();
+  }, [articles]);
+
   const handleExportMetadata = (targetArticles?: Article[], fileName: string = 'parsed_pdfs.json') => {
     const list = targetArticles || articles;
     if (list.length === 0) {
@@ -141,40 +148,13 @@ const LibrarianApp = () => {
     const list = targetArticles || articles;
     if (list.length === 0) return;
 
-    const entries = list.map(art => {
-      const { key, bib } = generateBibtexEntry(art);
-      const m = art.metadata!;
-      return {
-        file_path: art.filePath || art.fileName,
-        file_name: art.fileName,
-        title: m.title || "",
-        authors: m.authors || [],
-        year: parseInt(String(m.year)) || null,
-        journal: m.journal || "",
-        volume: m.volume || null,
-        number: m.number || null,
-        pages: m.pages || null,
-        doi: m.doi || "",
-        url: m.url || "",
-        bibtex_type: "misc",
-        bibtex_key: key,
-        bibtex: bib
-      };
-    });
+    const bibContent = list.map(art => generateBibtexEntry(art).bib).join('\n\n');
 
-    const exportData = {
-      root_path: list[0]?.filePath?.split('/')[0] || "Librarian Library",
-      source_parsed_json: "parsed_pdfs.json",
-      generated_at: new Date().toISOString().split('.')[0],
-      bibtex_count: entries.length,
-      entries: entries
-    };
-
-    const blob = new Blob([JSON.stringify(exportData, null, 2)], { type: 'application/json' });
-    const url = URL.createObjectURL(blob);
+    const blob = new Blob([bibContent], { type: 'text/plain' });
+    const url: string = URL.createObjectURL(blob);
     const a = document.createElement('a');
     a.href = url;
-    a.download = 'bibtex_pdfs.json';
+    a.download = 'references.bib';
     a.click();
     URL.revokeObjectURL(url);
   };
@@ -185,8 +165,7 @@ const LibrarianApp = () => {
 
       for (const jsonFile of jsonFiles) {
           try {
-              // Cast the result of text() to string to ensure it matches JSON.parse's expectations
-              const text = await jsonFile.text() as string;
+              const text: string = await jsonFile.text();
               const data = JSON.parse(text);
               if (data.pdfs && Array.isArray(data.pdfs)) {
                   data.pdfs.forEach((pdf: any) => {
@@ -256,7 +235,6 @@ const LibrarianApp = () => {
         const pdfMetadataMap = await processMetadataFiles(fileList);
         const newArticles: Article[] = [];
 
-        // Check if parsed_pdfs.json already exists in the import selection
         const hasExistingMetadata = fileList.some(f => f.name.toLowerCase() === 'parsed_pdfs.json');
 
         const getOrCreateSource = (fullPath: string, folderName: string, parentPath: string | null): string => {
@@ -318,7 +296,6 @@ const LibrarianApp = () => {
         setSources(prev => [...prev, ...newSources]);
         setArticles(prev => [...prev, ...newArticles]);
         
-        // Only generate parsed_pdfs.json if it wasn't already included in the folder import
         if (newArticles.length > 0 && !hasExistingMetadata) {
             handleExportMetadata(newArticles, 'parsed_pdfs.json');
         }
@@ -459,6 +436,9 @@ const LibrarianApp = () => {
         addDescendants(activeSourceId);
         list = list.filter(a => descendants.has(a.sourceId));
     }
+    if (activeCategoryId) {
+      list = list.filter(a => a.metadata?.categories.includes(activeCategoryId));
+    }
     if (searchQuery.trim()) {
       const q = searchQuery.toLowerCase();
       list = list.filter(a => (
@@ -466,7 +446,9 @@ const LibrarianApp = () => {
         a.metadata?.title.toLowerCase().includes(q) ||
         a.metadata?.authors.some(auth => auth.toLowerCase().includes(q)) ||
         a.metadata?.journal?.toLowerCase().includes(q) ||
-        a.metadata?.year.includes(q)
+        a.metadata?.year.includes(q) ||
+        a.metadata?.categories.some(c => c.toLowerCase().includes(q)) ||
+        a.metadata?.keywords.some(k => k.toLowerCase().includes(q))
       ));
     }
     if (sortConfig) {
@@ -484,7 +466,7 @@ const LibrarianApp = () => {
       });
     } else list.sort((a, b) => b.addedAt - a.addedAt);
     return [...list];
-  }, [articles, activeSourceId, searchQuery, sortConfig, sources]);
+  }, [articles, activeSourceId, activeCategoryId, searchQuery, sortConfig, sources]);
 
   const selectedArticle = useMemo(() => 
     articles.find(a => a.id === selectedArticleId), 
@@ -504,8 +486,11 @@ const LibrarianApp = () => {
         sources={sources}
         articles={articles}
         notes={notes}
+        categories={categories}
         activeSourceId={activeSourceId}
-        onSetActiveSource={setActiveSourceId}
+        activeCategoryId={activeCategoryId}
+        onSetActiveSource={(id) => { setActiveSourceId(id); setActiveCategoryId(null); }}
+        onSetActiveCategory={(cat) => { setActiveCategoryId(cat); setActiveSourceId(null); }}
         onOpenAddModal={() => setIsAddSourceModalOpen(true)}
         onOpenGenerateModal={() => setIsGenerateModalOpen(true)}
         onOpenSettings={() => setIsSettingsOpen(true)}
@@ -531,7 +516,6 @@ const LibrarianApp = () => {
         onSearchChange={setSearchQuery}
         onSaveSession={() => {
             const blob = new Blob([JSON.stringify({ sources, articles, notes }, null, 2)], { type: 'application/json' });
-            // Fix: ensure URL operations use explicit string types to avoid unknown type errors on revocation
             const url: string = URL.createObjectURL(blob);
             const a = document.createElement('a');
             a.href = url;
@@ -547,8 +531,9 @@ const LibrarianApp = () => {
               const file = (e.target as HTMLInputElement).files?.[0];
               if (!file) return;
               try {
-                // Fix: ensure text is interpreted as string explicitly
-                const text: string = await file.text();
+                // Fix for line 384 and 385: Explicitly cast the result of file.text() to string
+                // to avoid "unknown" type errors during assignment and when passed to JSON.parse.
+                const text = await file.text() as string;
                 const data = JSON.parse(text);
                 if (data.sources && data.articles) {
                   await restoreSession(data.sources, data.articles, data.notes || []);
@@ -603,7 +588,7 @@ const LibrarianApp = () => {
       </button>
 
       <SettingsModal isOpen={isSettingsOpen} onClose={() => setIsSettingsOpen(false)} currentTheme={theme} onThemeChange={setTheme} />
-      <NotebookModal isOpen={isNotebookSetupOpen} onClose={() => setIsNotebookSetupOpen(false)} articles={articles} categories={useMemo(() => Array.from(new Set(articles.flatMap(a => a.metadata?.categories || []))).sort(), [articles])} onConfirm={(type, tid) => { setIsEditingNote(false); setActiveEditorNote({ type, targetId: tid, content: '', title: type === 'article' ? `Notes on ${articles.find(a => a.id === tid)?.metadata?.title || 'Article'}` : 'New Note' }); }} />
+      <NotebookModal isOpen={isNotebookSetupOpen} onClose={() => setIsNotebookSetupOpen(false)} articles={articles} categories={categories} onConfirm={(type, tid) => { setIsEditingNote(false); setActiveEditorNote({ type, targetId: tid, content: '', title: type === 'article' ? `Notes on ${articles.find(a => a.id === tid)?.metadata?.title || 'Article'}` : 'New Note' }); }} />
       <AddSourceModal isOpen={isAddSourceModalOpen} onClose={() => setIsAddSourceModalOpen(false)} onAddSource={handleAddSource} onAddPDF={handleAddPDF} />
       <GenerateModal isOpen={isGenerateModalOpen} onClose={() => setIsGenerateModalOpen(false)} onConfirm={handleGenerateConfirm} />
       {activeEditorNote && <NotebookEditor isOpen={!!activeEditorNote} initialData={activeEditorNote} onClose={() => setActiveEditorNote(null)} onSave={async (nd) => {

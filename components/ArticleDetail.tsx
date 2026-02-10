@@ -129,37 +129,11 @@ export const ArticleDetail: React.FC<ArticleDetailProps> = ({
 
   const handleExportCitation = () => {
     const { key, bib } = generateBibtexEntry(article);
-    const m = article.metadata!;
-    const entry = {
-      file_path: article.filePath || article.fileName,
-      file_name: article.fileName,
-      title: m.title || "",
-      authors: m.authors || [],
-      year: parseInt(String(m.year)) || null,
-      journal: m.journal || "",
-      volume: m.volume || null,
-      number: m.number || null,
-      pages: m.pages || null,
-      doi: m.doi || "",
-      url: m.url || "",
-      bibtex_type: "misc",
-      bibtex_key: key,
-      bibtex: bib
-    };
-
-    const exportData = {
-      root_path: article.filePath?.split('/')[0] || "Librarian Library",
-      source_parsed_json: "parsed_pdfs.json",
-      generated_at: new Date().toISOString().split('.')[0],
-      bibtex_count: 1,
-      entries: [entry]
-    };
-
-    const blob = new Blob([JSON.stringify(exportData, null, 2)], { type: 'application/json' });
+    const blob = new Blob([bib], { type: 'text/plain' });
     const url = URL.createObjectURL(blob);
     const a = document.createElement('a');
     a.href = url;
-    a.download = 'bibtex_pdfs.json';
+    a.download = `${key}.bib`;
     a.click();
     URL.revokeObjectURL(url);
   };
@@ -295,7 +269,7 @@ export const ArticleDetail: React.FC<ArticleDetailProps> = ({
                     </div>
 
                     <div className="pt-8 border-t border-slate-100 dark:border-slate-800 space-y-4">
-                        <button onClick={handleExportCitation} className="w-full py-2 text-sm bg-slate-100 dark:bg-slate-800 text-slate-700 dark:text-slate-300 font-medium rounded hover:bg-slate-200 border border-slate-200 dark:border-slate-700 transition-colors">Export Citation</button>
+                        <button onClick={handleExportCitation} className="w-full py-2 text-sm bg-slate-100 dark:bg-slate-800 text-slate-700 dark:text-slate-300 font-medium rounded hover:bg-slate-200 border border-slate-200 dark:border-slate-700 transition-colors">Export Citation (.bib)</button>
                         <button onClick={async () => { setIsLoadingPdf(true); const b = await getFileFromDB(article.id); if(b) setPdfUrl(URL.createObjectURL(b)); setIsLoadingPdf(false); }} disabled={isLoadingPdf} className="w-full py-3 bg-indigo-600 text-white font-bold rounded-lg shadow-md">{isLoadingPdf ? "Loading..." : "Read PDF"}</button>
                     </div>
 
