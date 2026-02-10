@@ -36,6 +36,7 @@ const generateBibtexEntry = (art: Article) => {
   if (m.journal) bib += `  journal = {${m.journal}},\n`;
   if (m.volume) bib += `  volume = {${m.volume}},\n`;
   if (m.number) bib += `  number = {${m.number}},\n`;
+  if (m.pages) bib += `  pages = {${m.pages}},\n`;
   if (m.doi) bib += `  doi = {${m.doi}},\n`;
   if (m.url) bib += `  url = {${m.url}},\n`;
   bib += `  howpublished = {PDF},\n`;
@@ -59,6 +60,13 @@ export const ArticleDetail: React.FC<ArticleDetailProps> = ({
   const [volumeInput, setVolumeInput] = useState('');
   const [isEditingNumber, setIsEditingNumber] = useState(false);
   const [numberInput, setNumberInput] = useState('');
+  const [isEditingYear, setIsEditingYear] = useState(false);
+  const [yearInput, setYearInput] = useState('');
+  const [isEditingDoi, setIsEditingDoi] = useState(false);
+  const [doiInput, setDoiInput] = useState('');
+  const [isEditingPages, setIsEditingPages] = useState(false);
+  const [pagesInput, setPagesInput] = useState('');
+  
   const [pdfUrl, setPdfUrl] = useState<string | null>(null);
   const [isLoadingPdf, setIsLoadingPdf] = useState(false);
 
@@ -69,7 +77,12 @@ export const ArticleDetail: React.FC<ArticleDetailProps> = ({
         setJournalInput(article.metadata?.journal || '');
         setVolumeInput(article.metadata?.volume || '');
         setNumberInput(String(article.metadata?.number || ''));
+        setYearInput(article.metadata?.year || '');
+        setDoiInput(article.metadata?.doi || '');
+        setPagesInput(article.metadata?.pages || '');
+        
         setIsEditingTitle(false); setIsEditingAuthors(false); setIsEditingJournal(false); setIsEditingVolume(false); setIsEditingNumber(false);
+        setIsEditingYear(false); setIsEditingDoi(false); setIsEditingPages(false);
         setPdfUrl(null);
     }
   }, [article]);
@@ -90,6 +103,7 @@ export const ArticleDetail: React.FC<ArticleDetailProps> = ({
       journal: m.journal || "",
       volume: m.volume || null,
       number: m.number || null,
+      pages: m.pages || null,
       doi: m.doi || "",
       url: m.url || "",
       bibtex_type: "misc",
@@ -146,8 +160,16 @@ export const ArticleDetail: React.FC<ArticleDetailProps> = ({
                                 {isEditingNumber ? (<input className="flex-1 text-sm text-slate-700 dark:text-slate-300 bg-white dark:bg-slate-800 border border-indigo-500 rounded p-1" value={numberInput} onChange={(e) => setNumberInput(e.target.value)} onBlur={() => { onUpdateMetadata(article.id, { number: numberInput.trim() || null }); setIsEditingNumber(false); }} autoFocus />) : (<span className="text-slate-700 dark:text-slate-300 flex-1 cursor-pointer hover:text-indigo-600" onClick={() => setIsEditingNumber(true)}>{article.metadata?.number || '-'}</span>)}
                             </div>
                             <div className="flex gap-2 text-sm">
+                                <span className="font-semibold text-slate-500 dark:text-slate-400 w-16 pt-1">Pages:</span>
+                                {isEditingPages ? (<input className="flex-1 text-sm text-slate-700 dark:text-slate-300 bg-white dark:bg-slate-800 border border-indigo-500 rounded p-1" value={pagesInput} onChange={(e) => setPagesInput(e.target.value)} onBlur={() => { onUpdateMetadata(article.id, { pages: pagesInput.trim() }); setIsEditingPages(false); }} autoFocus />) : (<span className="text-slate-700 dark:text-slate-300 flex-1 cursor-pointer hover:text-indigo-600" onClick={() => setIsEditingPages(true)}>{article.metadata?.pages || '-'}</span>)}
+                            </div>
+                            <div className="flex gap-2 text-sm">
                                 <span className="font-semibold text-slate-500 dark:text-slate-400 w-16 pt-1">Year:</span>
-                                <span className="text-slate-700 dark:text-slate-300">{article.metadata?.year || 'Unknown'}</span>
+                                {isEditingYear ? (<input className="flex-1 text-sm text-slate-700 dark:text-slate-300 bg-white dark:bg-slate-800 border border-indigo-500 rounded p-1" value={yearInput} onChange={(e) => setYearInput(e.target.value)} onBlur={() => { onUpdateMetadata(article.id, { year: yearInput.trim() || 'Unknown' }); setIsEditingYear(false); }} autoFocus />) : (<span className="text-slate-700 dark:text-slate-300 flex-1 cursor-pointer hover:text-indigo-600" onClick={() => setIsEditingYear(true)}>{article.metadata?.year || 'Unknown'}</span>)}
+                            </div>
+                            <div className="flex gap-2 text-sm">
+                                <span className="font-semibold text-slate-500 dark:text-slate-400 w-16 pt-1">DOI:</span>
+                                {isEditingDoi ? (<input className="flex-1 text-sm text-slate-700 dark:text-slate-300 bg-white dark:bg-slate-800 border border-indigo-500 rounded p-1" value={doiInput} onChange={(e) => setDoiInput(e.target.value)} onBlur={() => { onUpdateMetadata(article.id, { doi: doiInput.trim() }); setIsEditingDoi(false); }} autoFocus />) : (<span className="text-slate-700 dark:text-slate-300 flex-1 cursor-pointer hover:text-indigo-600 break-all" onClick={() => setIsEditingDoi(true)}>{article.metadata?.doi || '-'}</span>)}
                             </div>
                         </div>
                     </header>

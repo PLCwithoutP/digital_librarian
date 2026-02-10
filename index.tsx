@@ -19,7 +19,6 @@ const generateBibtexEntry = (art: Article) => {
   const year = m.year && m.year !== "Unknown" ? m.year : "0000";
   const authors = m.authors || [];
   
-  // Key generation logic: [FirstAuthorLastName][Year][FirstSignificantTitleWord]
   let lastName = "anon";
   if (authors.length > 0) {
     const parts = authors[0].split(' ');
@@ -28,11 +27,7 @@ const generateBibtexEntry = (art: Article) => {
   
   const titleWords = (m.title || "").split(/\s+/).filter(w => w.length > 3);
   const firstTitleWord = (titleWords[0] || "entry").toLowerCase().replace(/[^a-z0-9]/g, '');
-  const baseKey = `${lastName}${year}${firstTitleWord}`;
-  
-  // Note: we don't have global state for key collisions here, 
-  // but we return it as requested.
-  const bibKey = baseKey;
+  const bibKey = `${lastName}${year}${firstTitleWord}`;
   
   const authorsStr = authors.join(' and ');
   let bib = `@misc{${bibKey},\n`;
@@ -42,6 +37,7 @@ const generateBibtexEntry = (art: Article) => {
   if (m.journal) bib += `  journal = {${m.journal}},\n`;
   if (m.volume) bib += `  volume = {${m.volume}},\n`;
   if (m.number) bib += `  number = {${m.number}},\n`;
+  if (m.pages) bib += `  pages = {${m.pages}},\n`;
   if (m.doi) bib += `  doi = {${m.doi}},\n`;
   if (m.url) bib += `  url = {${m.url}},\n`;
   bib += `  howpublished = {PDF},\n`;
@@ -157,6 +153,7 @@ const LibrarianApp = () => {
         journal: m.journal || "",
         volume: m.volume || null,
         number: m.number || null,
+        pages: m.pages || null,
         doi: m.doi || "",
         url: m.url || "",
         bibtex_type: "misc",
@@ -218,6 +215,7 @@ const LibrarianApp = () => {
               journal: meta.journal || "",
               volume: meta.volume || "",
               number: meta.number || null,
+              pages: meta.pages || "",
               doi: meta.doi || "",
               url: meta.url || "",
               year: meta.year ? String(meta.year) : "Unknown",
@@ -233,6 +231,7 @@ const LibrarianApp = () => {
               journal: "",
               volume: "",
               number: null,
+              pages: "",
               doi: "",
               url: "",
               year: "Unknown",
@@ -255,6 +254,9 @@ const LibrarianApp = () => {
         const newSources: Source[] = [];
         const pdfMetadataMap = await processMetadataFiles(fileList);
         const newArticles: Article[] = [];
+
+        // Check if parsed_pdfs.json already exists in the import selection
+        const hasExistingMetadata = fileList.some(f => f.name.toLowerCase() === 'parsed_pdfs.json');
 
         const getOrCreateSource = (fullPath: string, folderName: string, parentPath: string | null): string => {
             if (pathSourceIdMap.has(fullPath)) return pathSourceIdMap.get(fullPath)!;
@@ -315,8 +317,8 @@ const LibrarianApp = () => {
         setSources(prev => [...prev, ...newSources]);
         setArticles(prev => [...prev, ...newArticles]);
         
-        // As requested: generate the parsed_pdfs.json for the newly imported articles
-        if (newArticles.length > 0) {
+        // Only generate parsed_pdfs.json if it wasn't already included in the folder import
+        if (newArticles.length > 0 && !hasExistingMetadata) {
             handleExportMetadata(newArticles, 'parsed_pdfs.json');
         }
     } catch (err) {
@@ -402,7 +404,7 @@ const LibrarianApp = () => {
 
       for (const aid of articleIdsToRemove) {
           await deleteArticleFromDB(aid);
-          await deleteFileFromDB(aid); // Deletes IndexedDB copy, not disk file
+          await deleteFileFromDB(aid);
       }
       for (const sid of allSourceIdsToDelete) {
           await deleteSourceFromDB(sid);
@@ -441,7 +443,6 @@ const LibrarianApp = () => {
     if (options.references) {
       handleExportBibtex(list);
     }
-    // Note generation logic would follow here if implemented
   };
 
   const filteredArticles = useMemo(() => {
@@ -484,7 +485,6 @@ const LibrarianApp = () => {
     return [...list];
   }, [articles, activeSourceId, searchQuery, sortConfig, sources]);
 
-  // Fix: Define selectedArticle to resolve 'Cannot find name selectedArticle' error.
   const selectedArticle = useMemo(() => 
     articles.find(a => a.id === selectedArticleId), 
     [articles, selectedArticleId]

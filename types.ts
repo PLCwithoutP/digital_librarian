@@ -5,6 +5,7 @@ export interface ArticleMetadata {
   journal?: string;
   volume?: string;
   number?: string | number | null; // Issue number
+  pages?: string; // pp.
   year: string;
   doi?: string;
   url?: string;
