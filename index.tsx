@@ -185,7 +185,8 @@ const LibrarianApp = () => {
 
       for (const jsonFile of jsonFiles) {
           try {
-              const text = await jsonFile.text();
+              // Cast the result of text() to string to ensure it matches JSON.parse's expectations
+              const text = await jsonFile.text() as string;
               const data = JSON.parse(text);
               if (data.pdfs && Array.isArray(data.pdfs)) {
                   data.pdfs.forEach((pdf: any) => {
@@ -530,7 +531,8 @@ const LibrarianApp = () => {
         onSearchChange={setSearchQuery}
         onSaveSession={() => {
             const blob = new Blob([JSON.stringify({ sources, articles, notes }, null, 2)], { type: 'application/json' });
-            const url = URL.createObjectURL(blob);
+            // Fix: ensure URL operations use explicit string types to avoid unknown type errors on revocation
+            const url: string = URL.createObjectURL(blob);
             const a = document.createElement('a');
             a.href = url;
             a.download = 'librarian_session.json';
@@ -545,13 +547,16 @@ const LibrarianApp = () => {
               const file = (e.target as HTMLInputElement).files?.[0];
               if (!file) return;
               try {
-                const text = await file.text();
+                // Fix: ensure text is interpreted as string explicitly
+                const text: string = await file.text();
                 const data = JSON.parse(text);
                 if (data.sources && data.articles) {
                   await restoreSession(data.sources, data.articles, data.notes || []);
                   setSources(data.sources); setArticles(data.articles); setNotes(data.notes || []);
                 }
-              } catch (err) { alert("Failed to import session."); }
+              } catch (err) { 
+                alert(err instanceof Error ? err.message : "Failed to import session."); 
+              }
             };
             input.click();
         }}
