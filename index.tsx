@@ -80,20 +80,27 @@ const LibrarianApp = () => {
     const files = e.target.files;
     if (!files || files.length === 0) return;
     setIsLoading(true);
-    setLoadingMessage(refreshSourceId ? 'Refreshing folder...' : 'Linking folder contents...');
+    setLoadingMessage(refreshSourceId ? 'Syncing folder...' : 'Linking folder contents...');
+    
     try {
         const fileList: File[] = Array.from(files);
-        const pathSourceIdMap = new Map<string, string>();
         const newSources: Source[] = [];
         const newArticles: Article[] = [];
 
-        const getOrCreateSource = (fullPath: string, folderName: string, parentPath: string | null): string => {
-            if (pathSourceIdMap.has(fullPath)) return pathSourceIdMap.get(fullPath)!;
+        // Build a path map for existing sources to avoid duplicates
+        // Note: Sources added via directory upload often have a name corresponding to folder parts.
+        const existingSources = [...sources];
+        
+        const getOrCreateSource = (folderName: string, parentId: string | undefined): string => {
+            let existing = existingSources.find(s => s.name === folderName && s.parentId === parentId);
+            if (!existing) {
+                existing = newSources.find(s => s.name === folderName && s.parentId === parentId);
+            }
+            if (existing) return existing.id;
+
             const id = crypto.randomUUID();
-            const parentId = parentPath ? pathSourceIdMap.get(parentPath) : undefined;
             const newSource: Source = { id, name: folderName, parentId, order: 0 };
             newSources.push(newSource);
-            pathSourceIdMap.set(fullPath, id);
             return id;
         };
 
@@ -101,39 +108,31 @@ const LibrarianApp = () => {
             if (!file.name.toLowerCase().endsWith('.pdf')) continue;
             const relativePath = (file as any).webkitRelativePath || file.name;
             
-            // Re-linking logic
-            let existing = articles.find(a => a.filePath === relativePath);
+            // Re-linking existing articles in the session
+            let existing = articles.find(a => a.filePath === relativePath || (a.fileName === file.name && !a.filePath));
+            
             if (existing) {
                 fileMap.current.set(existing.id, file);
                 continue;
             }
 
+            // If it's a new file, create Source hierarchy
             const pathParts = relativePath.split('/');
-            let sourceId: string;
-            
+            let currentParentId: string | undefined = undefined;
+
             if (pathParts.length > 1) {
-                const folderParts = pathParts.slice(0, -1);
-                let currentPath = "";
-                for (const folderName of folderParts) {
-                    const parentPath = currentPath;
-                    currentPath = currentPath ? `${currentPath}/${folderName}` : folderName;
-                    getOrCreateSource(currentPath, folderName, parentPath || null);
+                const folders = pathParts.slice(0, -1);
+                for (const folderName of folders) {
+                    currentParentId = getOrCreateSource(folderName, currentParentId);
                 }
-                sourceId = pathSourceIdMap.get(currentPath)!;
             } else {
-                const rootSourceName = "Imported Files";
-                let existingRoot = sources.find(s => s.name === rootSourceName);
-                if(existingRoot) sourceId = existingRoot.id;
-                else {
-                    sourceId = crypto.randomUUID();
-                    newSources.push({ id: sourceId, name: rootSourceName, order: 0 });
-                }
+                currentParentId = getOrCreateSource("Imported Files", undefined);
             }
 
             const articleId = crypto.randomUUID();
             const newArt: Article = {
                 id: articleId,
-                sourceId,
+                sourceId: currentParentId!,
                 fileName: file.name,
                 filePath: relativePath,
                 fileSize: file.size,
@@ -147,8 +146,13 @@ const LibrarianApp = () => {
 
         setSources(prev => [...prev, ...newSources]);
         setArticles(prev => [...prev, ...newArticles]);
+        
+        if (refreshSourceId) {
+            alert(`Sync complete! ${newArticles.length} new articles found. Existing articles re-linked.`);
+        }
     } catch (err) {
         console.error(err);
+        alert("Refresh failed. Ensure you picked the correct root directory.");
     } finally {
         setIsLoading(false);
         if (e.target) e.target.value = "";
@@ -168,6 +172,20 @@ const LibrarianApp = () => {
   };
 
   const handleMoveSource = (sourceId: string, targetParentId: string | null) => {
+    // Avoid circular nesting (moving a folder into its own child)
+    const isDescendant = (parent: string, child: string): boolean => {
+        const c = sources.find(s => s.id === child);
+        if (!c || !c.parentId) return false;
+        if (c.parentId === parent) return true;
+        return isDescendant(parent, c.parentId);
+    };
+
+    if (sourceId === targetParentId) return;
+    if (targetParentId && isDescendant(sourceId, targetParentId)) {
+        alert("Cannot move a folder into its own subfolder.");
+        return;
+    }
+
     setSources(prev => prev.map(s => s.id === sourceId ? { ...s, parentId: targetParentId || undefined } : s));
   };
 
@@ -182,7 +200,7 @@ const LibrarianApp = () => {
   };
 
   const handleDeleteSource = (id: string) => {
-    if (!window.confirm("Remove this folder/group?")) return;
+    if (!window.confirm("Remove this folder/group and all its contents?")) return;
     const allSourceIdsToDelete = new Set<string>();
     const collectIds = (sid: string) => {
         allSourceIdsToDelete.add(sid);
@@ -282,7 +300,7 @@ const LibrarianApp = () => {
                     setSources(data.sources || []);
                     setArticles(data.articles);
                     setNotes(data.notes || []);
-                    alert("Session imported. Refresh folders to re-link PDFs.");
+                    alert("Session imported. Click 'Refresh' on folders to re-link your local PDF files.");
                 }
               } catch (err) { alert("Invalid session file."); }
             };
@@ -314,7 +332,7 @@ const LibrarianApp = () => {
 
       <SettingsModal isOpen={isSettingsOpen} onClose={() => setIsSettingsOpen(false)} currentTheme={theme} onThemeChange={setTheme} />
       <NotebookModal isOpen={isNotebookSetupOpen} onClose={() => setIsNotebookSetupOpen(false)} articles={articles} categories={categories} onConfirm={(type, tid) => setActiveEditorNote({ type, targetId: tid, content: '', title: 'New Note' })} />
-      <AddSourceModal isOpen={isAddSourceModalOpen} onClose={() => setIsAddSourceModalOpen(false)} onAddSource={handleAddSource} onAddPDF={(e) => alert("Add individual PDFs via 'Add Folder' mechanism in this session logic.")} />
+      <AddSourceModal isOpen={isAddSourceModalOpen} onClose={() => setIsAddSourceModalOpen(false)} onAddSource={handleAddSource} onAddPDF={(e) => alert("Individual PDF linking is handled via Folder Merge logic.")} />
       <GenerateModal isOpen={isGenerateModalOpen} onClose={() => setIsGenerateModalOpen(false)} onConfirm={() => alert("Check downloads for your export.")} />
       
       {activeEditorNote && <NotebookEditor isOpen={!!activeEditorNote} initialData={activeEditorNote} onClose={() => setActiveEditorNote(null)} onSave={(nd) => {
@@ -327,6 +345,15 @@ const LibrarianApp = () => {
       }} isEditing={isEditingNote} />}
 
       <NoteViewerModal note={selectedNote} onClose={() => setSelectedNote(null)} onUpdateTitle={(id, t) => setNotes(prev => prev.map(n => n.id === id ? {...n, title: t} : n))} onDelete={(id) => setNotes(prev => prev.filter(n => n.id !== id))} onEdit={(n) => { setSelectedNote(null); setIsEditingNote(true); setActiveEditorNote(n); }} />
+      
+      {isLoading && (
+          <div className="fixed inset-0 z-[100] bg-black/50 flex items-center justify-center">
+              <div className="bg-white dark:bg-slate-900 p-8 rounded-xl shadow-2xl flex flex-col items-center">
+                  <div className="w-12 h-12 border-4 border-indigo-500 border-t-transparent rounded-full animate-spin mb-4"></div>
+                  <p className="text-lg font-bold text-slate-900 dark:text-white">{loadingMessage}</p>
+              </div>
+          </div>
+      )}
     </div>
   );
 };

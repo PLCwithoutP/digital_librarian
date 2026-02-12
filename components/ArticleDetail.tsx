@@ -96,7 +96,7 @@ export const ArticleDetail: React.FC<ArticleDetailProps> = ({
         const blob = new Blob([file], { type: 'application/pdf' });
         setPdfUrl(URL.createObjectURL(blob));
     } else {
-        alert("File link missing! Please 'Refresh Folder' in the sidebar to re-link your local PDF files.");
+        alert("File link missing! Click 'Refresh' in the sidebar on the original folder to re-link your local PDF files.");
     }
     setIsLoadingPdf(false);
   };
@@ -136,7 +136,7 @@ export const ArticleDetail: React.FC<ArticleDetailProps> = ({
         multiline ? (
           <textarea 
             autoFocus 
-            className="flex-1 bg-white dark:bg-slate-800 border-2 border-indigo-500 rounded p-1 text-sm text-slate-900 dark:text-slate-100 outline-none min-h-[100px]" 
+            className="flex-1 bg-slate-100 dark:bg-slate-800 border-2 border-indigo-500 rounded p-1 text-sm text-slate-900 dark:text-slate-100 outline-none min-h-[120px]" 
             value={inputValue} 
             onChange={e => setInputValue(e.target.value)} 
             onBlur={() => { onSave(); setIsEditing(false); }} 
@@ -144,7 +144,7 @@ export const ArticleDetail: React.FC<ArticleDetailProps> = ({
         ) : (
           <input 
             autoFocus 
-            className="flex-1 bg-white dark:bg-slate-800 border-b-2 border-indigo-500 outline-none text-sm text-slate-900 dark:text-slate-100 px-1 py-1" 
+            className="flex-1 bg-slate-100 dark:bg-slate-800 border-b-2 border-indigo-500 outline-none text-sm text-slate-900 dark:text-slate-100 px-1 py-1" 
             value={inputValue} 
             onChange={e => setInputValue(e.target.value)} 
             onBlur={() => { onSave(); setIsEditing(false); }} 
@@ -163,7 +163,7 @@ export const ArticleDetail: React.FC<ArticleDetailProps> = ({
         <div className="p-4 border-b border-slate-100 dark:border-slate-800 flex items-center justify-between bg-slate-50 dark:bg-slate-900 shrink-0">
             <h2 className="text-xs font-bold uppercase tracking-widest text-slate-500">Metadata & Reader</h2>
             <div className="flex items-center gap-2">
-                {pdfUrl && <button onClick={() => setPdfUrl(null)} className="text-xs px-3 py-1 bg-slate-200 dark:bg-slate-700 rounded text-slate-700 dark:text-slate-200 hover:bg-slate-300 transition-colors">Close Reader</button>}
+                {pdfUrl && <button onClick={() => setPdfUrl(null)} className="text-xs px-3 py-1 bg-slate-200 dark:bg-slate-700 rounded text-slate-700 dark:text-slate-200 hover:bg-slate-300 transition-colors font-bold">Close Reader</button>}
                 <button onClick={onClose} className="text-slate-400 hover:text-slate-600 p-1"><svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" /></svg></button>
             </div>
         </div>
@@ -172,7 +172,7 @@ export const ArticleDetail: React.FC<ArticleDetailProps> = ({
                 <div className="space-y-6">
                     <header>
                         {isEditingTitle ? (
-                           <textarea autoFocus className="w-full text-xl font-bold bg-white dark:bg-slate-800 text-slate-900 dark:text-slate-100 border-2 border-indigo-500 rounded p-2 focus:outline-none" value={titleInput} onChange={e => setTitleInput(e.target.value)} onBlur={() => { onUpdateMetadata(article.id, { title: titleInput }); setIsEditingTitle(false); }} />
+                           <textarea autoFocus className="w-full text-xl font-bold bg-slate-100 dark:bg-slate-800 text-slate-900 dark:text-slate-100 border-2 border-indigo-500 rounded p-2 focus:outline-none" value={titleInput} onChange={e => setTitleInput(e.target.value)} onBlur={() => { onUpdateMetadata(article.id, { title: titleInput }); setIsEditingTitle(false); }} />
                         ) : (
                            <h3 className="text-xl font-bold text-slate-900 dark:text-slate-100 mb-2 cursor-pointer hover:text-indigo-600 leading-tight" onClick={() => setIsEditingTitle(true)}>{article.metadata?.title || article.fileName}</h3>
                         )}
@@ -193,7 +193,6 @@ export const ArticleDetail: React.FC<ArticleDetailProps> = ({
                         </div>
                     </header>
 
-                    {/* Categories Section */}
                     <div className="pt-6 border-t border-slate-100 dark:border-slate-800">
                         <h4 className="text-xs font-bold uppercase text-slate-500 mb-3 tracking-widest">Categories</h4>
                         <div className="flex flex-wrap gap-2 mb-3">
@@ -210,21 +209,20 @@ export const ArticleDetail: React.FC<ArticleDetailProps> = ({
                             <input 
                                 type="text" 
                                 placeholder="Add category..." 
-                                className="flex-1 text-xs bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded px-2 py-1.5 text-slate-900 dark:text-slate-100 outline-none focus:ring-1 focus:ring-indigo-500"
+                                className="flex-1 text-xs bg-slate-100 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded px-2 py-1.5 text-slate-900 dark:text-slate-100 outline-none focus:ring-1 focus:ring-indigo-500"
                                 value={newCategory}
                                 onChange={(e) => setNewCategory(e.target.value)}
                                 onKeyDown={(e) => e.key === 'Enter' && handleAddCategory()}
                             />
-                            <button onClick={handleAddCategory} className="px-3 py-1 bg-indigo-600 text-white rounded text-xs font-bold hover:bg-indigo-700">Add</button>
+                            <button onClick={handleAddCategory} className="px-3 py-1 bg-indigo-600 text-white rounded text-xs font-bold hover:bg-indigo-700 transition-colors shadow-sm">Add</button>
                         </div>
                     </div>
 
-                    {/* Keywords Section */}
                     <div className="pt-6 border-t border-slate-100 dark:border-slate-800">
                         <h4 className="text-xs font-bold uppercase text-slate-500 mb-3 tracking-widest">Keywords</h4>
                         <div className="flex flex-wrap gap-1.5 mb-3">
                             {article.metadata?.keywords?.length ? article.metadata.keywords.map(kw => (
-                                <span key={kw} className="inline-flex items-center gap-1 px-2 py-0.5 rounded bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-300 text-[10px] border border-slate-200 dark:border-slate-700">
+                                <span key={kw} className="inline-flex items-center gap-1 px-2 py-0.5 rounded bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-300 text-[10px] border border-slate-200 dark:border-slate-700 shadow-sm">
                                     {kw}
                                     <button onClick={() => handleRemoveKeyword(kw)} className="hover:text-red-500 transition-colors">
                                         <svg className="w-2.5 h-2.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={3} d="M6 18L18 6M6 6l12 12" /></svg>
@@ -236,19 +234,19 @@ export const ArticleDetail: React.FC<ArticleDetailProps> = ({
                             <input 
                                 type="text" 
                                 placeholder="Add keyword..." 
-                                className="flex-1 text-xs bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded px-2 py-1.5 text-slate-900 dark:text-slate-100 outline-none focus:ring-1 focus:ring-indigo-500"
+                                className="flex-1 text-xs bg-slate-100 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded px-2 py-1.5 text-slate-900 dark:text-slate-100 outline-none focus:ring-1 focus:ring-indigo-500"
                                 value={newKeyword}
                                 onChange={(e) => setNewKeyword(e.target.value)}
                                 onKeyDown={(e) => e.key === 'Enter' && handleAddKeyword()}
                             />
-                            <button onClick={handleAddKeyword} className="px-3 py-1 bg-slate-700 text-white rounded text-xs font-bold hover:bg-slate-600">Add</button>
+                            <button onClick={handleAddKeyword} className="px-3 py-1 bg-slate-700 text-white rounded text-xs font-bold hover:bg-slate-600 transition-colors shadow-sm">Add</button>
                         </div>
                     </div>
 
                     <div className="pt-6 space-y-2 pb-12">
                         <button onClick={handleLoadPdf} disabled={isLoadingPdf} className="w-full py-4 bg-indigo-600 hover:bg-indigo-700 text-white font-bold rounded-xl shadow-lg transition-all active:scale-95 flex items-center justify-center gap-2">
                             <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" /><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z" /></svg>
-                            {isLoadingPdf ? "Loading..." : "Read PDF"}
+                            {isLoadingPdf ? "Opening..." : "Read PDF"}
                         </button>
                     </div>
                 </div>
@@ -262,9 +260,9 @@ export const ArticleDetail: React.FC<ArticleDetailProps> = ({
                 >
                     <div className="flex flex-col items-center justify-center h-full bg-slate-100 dark:bg-slate-800 text-slate-500 dark:text-slate-400 p-12 text-center">
                         <svg className="w-16 h-16 mb-4 opacity-20" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1} d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" /></svg>
-                        <p className="font-bold mb-2">PDF Preview Error</p>
-                        <p className="text-sm mb-6">Your browser may be blocking the preview.</p>
-                        <a href={pdfUrl} target="_blank" rel="noreferrer" className="px-6 py-2 bg-indigo-600 text-white rounded-lg font-bold shadow-md hover:bg-indigo-700 transition-colors">Open in New Tab</a>
+                        <p className="font-bold mb-2">Preview Unavailable</p>
+                        <p className="text-sm mb-6">Your browser security settings might prevent previewing this local blob.</p>
+                        <a href={pdfUrl} target="_blank" rel="noreferrer" className="px-6 py-2 bg-indigo-600 text-white rounded-lg font-bold shadow-md hover:bg-indigo-700 transition-colors">Open PDF Separately</a>
                     </div>
                 </object>
               </div>
