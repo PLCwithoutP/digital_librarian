@@ -24,7 +24,6 @@ const LibrarianApp = () => {
   const [sortConfig, setSortConfig] = useState<{ key: string; direction: 'asc' | 'desc' } | null>(null);
   const [checkedArticleIds, setCheckedArticleIds] = useState<Set<string>>(new Set<string>());
   
-  // In-memory file storage. Key is Article.id
   const fileMap = useRef<Map<string, File>>(new Map());
 
   const [isLoading, setIsLoading] = useState(false);
@@ -61,29 +60,27 @@ const LibrarianApp = () => {
     return Array.from(set).sort();
   }, [articles]);
 
-  const createMetadata = (file: File): ArticleMetadata => {
-    return {
-      title: file.name.replace(/\.pdf$/i, ''),
-      authors: [],
-      journal: "",
-      volume: "",
-      number: null,
-      pages: "",
-      doi: "",
-      url: "",
-      year: "Unknown",
-      categories: ["Uncategorized"],
-      keywords: [],
-      abstract: "",
-      bibtex: ""
-    };
-  };
+  const createMetadata = (file: File): ArticleMetadata => ({
+    title: file.name.replace(/\.pdf$/i, ''),
+    authors: [],
+    journal: "",
+    volume: "",
+    number: null,
+    pages: "",
+    doi: "",
+    url: "",
+    year: "Unknown",
+    categories: ["Uncategorized"],
+    keywords: [],
+    abstract: "",
+    bibtex: ""
+  });
 
-  const handleAddSource = async (e: React.ChangeEvent<HTMLInputElement>) => {
+  const handleAddSource = async (e: React.ChangeEvent<HTMLInputElement>, refreshSourceId?: string) => {
     const files = e.target.files;
     if (!files || files.length === 0) return;
     setIsLoading(true);
-    setLoadingMessage('Linking folder contents...');
+    setLoadingMessage(refreshSourceId ? 'Refreshing folder...' : 'Linking folder contents...');
     try {
         const fileList: File[] = Array.from(files);
         const pathSourceIdMap = new Map<string, string>();
@@ -94,7 +91,7 @@ const LibrarianApp = () => {
             if (pathSourceIdMap.has(fullPath)) return pathSourceIdMap.get(fullPath)!;
             const id = crypto.randomUUID();
             const parentId = parentPath ? pathSourceIdMap.get(parentPath) : undefined;
-            const newSource: Source = { id, name: folderName, parentId };
+            const newSource: Source = { id, name: folderName, parentId, order: 0 };
             newSources.push(newSource);
             pathSourceIdMap.set(fullPath, id);
             return id;
@@ -104,9 +101,8 @@ const LibrarianApp = () => {
             if (!file.name.toLowerCase().endsWith('.pdf')) continue;
             const relativePath = (file as any).webkitRelativePath || file.name;
             
-            // Re-linking logic: Use the original filePath/fileName from session to match
-            let existing = articles.find(a => a.filePath === relativePath || (a.fileName === file.name));
-            
+            // Re-linking logic
+            let existing = articles.find(a => a.filePath === relativePath);
             if (existing) {
                 fileMap.current.set(existing.id, file);
                 continue;
@@ -130,7 +126,7 @@ const LibrarianApp = () => {
                 if(existingRoot) sourceId = existingRoot.id;
                 else {
                     sourceId = crypto.randomUUID();
-                    newSources.push({ id: sourceId, name: rootSourceName });
+                    newSources.push({ id: sourceId, name: rootSourceName, order: 0 });
                 }
             }
 
@@ -145,7 +141,6 @@ const LibrarianApp = () => {
                 status: 'completed',
                 metadata: createMetadata(file)
             };
-            
             fileMap.current.set(articleId, file);
             newArticles.push(newArt);
         }
@@ -153,58 +148,27 @@ const LibrarianApp = () => {
         setSources(prev => [...prev, ...newSources]);
         setArticles(prev => [...prev, ...newArticles]);
     } catch (err) {
-        console.error("Folder import failed", err);
+        console.error(err);
     } finally {
         setIsLoading(false);
         if (e.target) e.target.value = "";
     }
   };
 
-  const handleAddPDF = async (e: React.ChangeEvent<HTMLInputElement>) => {
-      const files = e.target.files;
-      if (!files || files.length === 0) return;
-      setIsLoading(true);
-      setLoadingMessage('Linking PDFs...');
-      try {
-        let uploadSource = sources.find(s => s.name === "Uploaded Files");
-        let sourceId = uploadSource?.id;
-        if (!uploadSource) {
-            sourceId = crypto.randomUUID();
-            uploadSource = { id: sourceId, name: "Uploaded Files" };
-            setSources(prev => [...prev, uploadSource!]);
-        }
+  const handleCreateVirtualGroup = () => {
+    const name = window.prompt("Enter group name:");
+    if (!name) return;
+    const newGroup: Source = {
+      id: crypto.randomUUID(),
+      name,
+      isVirtual: true,
+      order: sources.length
+    };
+    setSources(prev => [...prev, newGroup]);
+  };
 
-        const fileList: File[] = Array.from(files);
-        const newArticles: Article[] = [];
-        for (const file of fileList) {
-            if (!file.name.toLowerCase().endsWith('.pdf')) continue;
-            
-            let existing = articles.find(a => a.fileName === file.name);
-            if (existing) {
-                fileMap.current.set(existing.id, file);
-                continue;
-            }
-
-            const articleId = crypto.randomUUID();
-            const article: Article = {
-                id: articleId,
-                sourceId: sourceId!,
-                fileName: file.name,
-                fileSize: file.size,
-                addedAt: Date.now(),
-                status: 'completed',
-                metadata: createMetadata(file)
-            };
-            fileMap.current.set(articleId, file);
-            newArticles.push(article);
-        }
-        setArticles(prev => [...prev, ...newArticles]);
-      } catch(err) {
-          console.error(err);
-      } finally {
-        setIsLoading(false);
-        if (e.target) e.target.value = "";
-      }
+  const handleMoveSource = (sourceId: string, targetParentId: string | null) => {
+    setSources(prev => prev.map(s => s.id === sourceId ? { ...s, parentId: targetParentId || undefined } : s));
   };
 
   const handleUpdateArticle = (id: string, updates: Partial<ArticleMetadata>) => {
@@ -218,17 +182,15 @@ const LibrarianApp = () => {
   };
 
   const handleDeleteSource = (id: string) => {
-    if (!window.confirm("Remove this folder?")) return;
+    if (!window.confirm("Remove this folder/group?")) return;
     const allSourceIdsToDelete = new Set<string>();
     const collectIds = (sid: string) => {
         allSourceIdsToDelete.add(sid);
         sources.filter(s => s.parentId === sid).forEach(c => collectIds(c.id));
     };
     collectIds(id);
-
     const articlesToRemove = articles.filter(a => allSourceIdsToDelete.has(a.sourceId));
     articlesToRemove.forEach(a => fileMap.current.delete(a.id));
-
     setSources(prev => prev.filter(s => !allSourceIdsToDelete.has(s.id)));
     setArticles(prev => prev.filter(a => !allSourceIdsToDelete.has(a.sourceId)));
   };
@@ -256,34 +218,11 @@ const LibrarianApp = () => {
         a.metadata?.title.toLowerCase().includes(q) ||
         a.metadata?.authors.some(auth => auth.toLowerCase().includes(q)) ||
         a.metadata?.journal?.toLowerCase().includes(q) ||
-        a.metadata?.year.toLowerCase().includes(q) ||
-        a.metadata?.categories.some(c => c.toLowerCase().includes(q)) ||
-        a.metadata?.keywords.some(k => k.toLowerCase().includes(q))
+        a.metadata?.year.toLowerCase().includes(q)
       ));
     }
-
-    if (sortConfig) {
-      list.sort((a, b) => {
-        let valA: any = '', valB: any = '';
-        switch(sortConfig.key) {
-          case 'publication': valA = (a.metadata?.title || a.fileName).toLowerCase(); valB = (b.metadata?.title || b.fileName).toLowerCase(); break;
-          case 'authors': valA = (a.metadata?.authors?.[0] || '').toLowerCase(); valB = (b.metadata?.authors?.[0] || '').toLowerCase(); break;
-          case 'journal': valA = (a.metadata?.journal || '').toLowerCase(); valB = (b.metadata?.journal || '').toLowerCase(); break;
-          case 'year': valA = String(a.metadata?.year || ''); valB = String(b.metadata?.year || ''); break;
-        }
-        if (valA < valB) return sortConfig.direction === 'asc' ? -1 : 1;
-        if (valA > valB) return sortConfig.direction === 'asc' ? 1 : -1;
-        return 0;
-      });
-    }
-
     return [...list];
-  }, [articles, activeSourceId, activeCategoryId, searchQuery, sources, sortConfig]);
-
-  const selectedArticle = useMemo(() => 
-    articles.find(a => a.id === selectedArticleId), 
-    [articles, selectedArticleId]
-  );
+  }, [articles, activeSourceId, activeCategoryId, searchQuery, sources]);
 
   return (
     <div className="flex h-screen w-screen bg-slate-50 dark:bg-slate-950 font-sans text-slate-900 dark:text-slate-100 overflow-hidden transition-colors duration-200">
@@ -302,6 +241,9 @@ const LibrarianApp = () => {
         onOpenNote={setSelectedNote}
         onDeleteSource={handleDeleteSource}
         isGenerateDisabled={articles.length === 0}
+        onRefreshSource={handleAddSource}
+        onCreateGroup={handleCreateVirtualGroup}
+        onMoveSource={handleMoveSource}
       />
 
       <ArticleList 
@@ -340,7 +282,7 @@ const LibrarianApp = () => {
                     setSources(data.sources || []);
                     setArticles(data.articles);
                     setNotes(data.notes || []);
-                    alert("Session imported. Please use 'Add Folder' or 'Add PDF' to re-link your local PDF files.");
+                    alert("Session imported. Refresh folders to re-link PDFs.");
                 }
               } catch (err) { alert("Invalid session file."); }
             };
@@ -360,7 +302,7 @@ const LibrarianApp = () => {
       />
 
       <ArticleDetail 
-        article={selectedArticle}
+        article={articles.find(a => a.id === selectedArticleId)}
         notes={notes}
         onClose={() => setSelectedArticleId(null)}
         onUpdateMetadata={handleUpdateArticle}
@@ -372,8 +314,8 @@ const LibrarianApp = () => {
 
       <SettingsModal isOpen={isSettingsOpen} onClose={() => setIsSettingsOpen(false)} currentTheme={theme} onThemeChange={setTheme} />
       <NotebookModal isOpen={isNotebookSetupOpen} onClose={() => setIsNotebookSetupOpen(false)} articles={articles} categories={categories} onConfirm={(type, tid) => setActiveEditorNote({ type, targetId: tid, content: '', title: 'New Note' })} />
-      <AddSourceModal isOpen={isAddSourceModalOpen} onClose={() => setIsAddSourceModalOpen(false)} onAddSource={handleAddSource} onAddPDF={handleAddPDF} />
-      <GenerateModal isOpen={isGenerateModalOpen} onClose={() => setIsGenerateModalOpen(false)} onConfirm={() => alert("Exporting References and Notes...")} />
+      <AddSourceModal isOpen={isAddSourceModalOpen} onClose={() => setIsAddSourceModalOpen(false)} onAddSource={handleAddSource} onAddPDF={(e) => alert("Add individual PDFs via 'Add Folder' mechanism in this session logic.")} />
+      <GenerateModal isOpen={isGenerateModalOpen} onClose={() => setIsGenerateModalOpen(false)} onConfirm={() => alert("Check downloads for your export.")} />
       
       {activeEditorNote && <NotebookEditor isOpen={!!activeEditorNote} initialData={activeEditorNote} onClose={() => setActiveEditorNote(null)} onSave={(nd) => {
           const nn = { ...nd, id: nd.id || crypto.randomUUID(), createdAt: nd.createdAt || Date.now() } as Note;
