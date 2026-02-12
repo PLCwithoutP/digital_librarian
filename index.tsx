@@ -86,16 +86,13 @@ const LibrarianApp = () => {
         const fileList: File[] = Array.from(files);
         const newSources: Source[] = [];
         const newArticlesList: Article[] = [];
-
-        // Build a path cache for existing articles to avoid duplicates
         const existingPaths = new Set(articles.map(a => a.filePath));
+        const refreshSource = refreshSourceId ? sources.find(s => s.id === refreshSourceId) : null;
 
         const getOrCreateSource = (folderName: string, parentId: string | undefined): string => {
             let existing = sources.find(s => s.name === folderName && s.parentId === parentId);
             if (!existing) existing = newSources.find(s => s.name === folderName && s.parentId === parentId);
-            
             if (existing) return existing.id;
-
             const id = crypto.randomUUID();
             const newSource: Source = { id, name: folderName, parentId, order: 0 };
             newSources.push(newSource);
@@ -107,11 +104,20 @@ const LibrarianApp = () => {
 
         for (const file of fileList) {
             if (!file.name.toLowerCase().endsWith('.pdf')) continue;
-            const relativePath = (file as any).webkitRelativePath || file.name;
+            let relativePath = (file as any).webkitRelativePath || file.name;
             
-            // SMART SYNC: Check if path already exists
+            // Normalize path for Sync: 
+            // If we are syncing "MyPapers", and path is "MyPapers/file.pdf", 
+            // we should treat the internal path as just "file.pdf" to match existing storage.
+            if (refreshSource) {
+                const prefix = refreshSource.name + "/";
+                if (relativePath.startsWith(prefix)) {
+                    relativePath = relativePath.substring(prefix.length);
+                }
+            }
+
+            // DEDUPLICATION: If path exists, just re-link the file handle
             if (existingPaths.has(relativePath)) {
-                // Find existing article and update its file reference
                 const existingArt = articles.find(a => a.filePath === relativePath);
                 if (existingArt) {
                     fileMap.current.set(existingArt.id, file);
@@ -129,7 +135,8 @@ const LibrarianApp = () => {
                     currentParentId = getOrCreateSource(folderName, currentParentId);
                 }
             } else if (!refreshSourceId) {
-                currentParentId = getOrCreateSource("Imported Files", undefined);
+                // If it's a flat file upload or single folder
+                currentParentId = getOrCreateSource("Root", undefined);
             }
 
             const articleId = crypto.randomUUID();
@@ -152,11 +159,11 @@ const LibrarianApp = () => {
         if (newArticlesList.length > 0) setArticles(prev => [...prev, ...newArticlesList]);
         
         if (refreshSourceId) {
-            alert(`Sync Finished!\nNew PDF paths added: ${newCount}\nExisting PDF links refreshed: ${updateCount}`);
+            alert(`Sync Finished!\nNew files: ${newCount}\nRe-linked: ${updateCount}`);
         }
     } catch (err) {
         console.error(err);
-        alert("Operation failed. Ensure the folder is still accessible on your device.");
+        alert("Action failed. Browser folder access may have timed out.");
     } finally {
         setIsLoading(false);
         if (e.target) e.target.value = "";
@@ -164,15 +171,9 @@ const LibrarianApp = () => {
   };
 
   const handleCreateVirtualGroup = () => {
-    const name = window.prompt("Enter Group name:");
-    if (!name || !name.trim()) return;
-    const newGroup: Source = {
-      id: crypto.randomUUID(),
-      name: name.trim(),
-      isVirtual: true,
-      order: sources.length
-    };
-    setSources(prev => [...prev, newGroup]);
+    const name = window.prompt("New Group Name:");
+    if (!name?.trim()) return;
+    setSources(prev => [...prev, { id: crypto.randomUUID(), name: name.trim(), isVirtual: true, order: prev.length }]);
   };
 
   const handleAssignFolderToGroup = (folderId: string, groupId: string | null) => {
@@ -180,60 +181,38 @@ const LibrarianApp = () => {
   };
 
   const handleUpdateArticle = (id: string, updates: Partial<ArticleMetadata>) => {
-    setArticles(prev => {
-        const idx = prev.findIndex(a => a.id === id);
-        if (idx === -1) return prev;
-        const newArr = [...prev];
-        newArr[idx] = { ...newArr[idx], metadata: { ...newArr[idx].metadata!, ...updates } };
-        return newArr;
-    });
+    setArticles(prev => prev.map(a => a.id === id ? { ...a, metadata: { ...a.metadata!, ...updates } } : a));
   };
 
   const handleDeleteSource = (id: string) => {
     const source = sources.find(s => s.id === id);
-    const msg = source?.isVirtual ? "Remove this group? Folders inside will return to the main library." : "Remove this folder and all documents inside?";
-    if (!window.confirm(msg)) return;
-
+    if (!window.confirm(source?.isVirtual ? "Delete group?" : "Delete folder and all PDFs inside?")) return;
     if (source?.isVirtual) {
         setSources(prev => prev.filter(s => s.id !== id).map(s => s.parentId === id ? { ...s, parentId: undefined } : s));
     } else {
-        const allSourceIdsToDelete = new Set<string>();
-        const collectIds = (sid: string) => {
-            allSourceIdsToDelete.add(sid);
-            sources.filter(s => s.parentId === sid).forEach(c => collectIds(c.id));
-        };
-        collectIds(id);
-        const articlesToRemove = articles.filter(a => allSourceIdsToDelete.has(a.sourceId));
-        articlesToRemove.forEach(a => fileMap.current.delete(a.id));
-        setSources(prev => prev.filter(s => !allSourceIdsToDelete.has(s.id)));
-        setArticles(prev => prev.filter(a => !allSourceIdsToDelete.has(a.sourceId)));
+        const toDelete = new Set<string>([id]);
+        const findChildren = (pid: string) => sources.filter(s => s.parentId === pid).forEach(c => { toDelete.add(c.id); findChildren(c.id); });
+        findChildren(id);
+        setArticles(prev => prev.filter(a => !toDelete.has(a.sourceId)));
+        setSources(prev => prev.filter(s => !toDelete.has(s.id)));
     }
   };
 
   const filteredArticles = useMemo(() => {
     let list = articles;
     if (activeSourceId) {
-        const descendants = new Set<string>([activeSourceId]);
-        const addDescendants = (parentId: string) => {
-            sources.filter(s => s.parentId === parentId).forEach(c => {
-                descendants.add(c.id);
-                addDescendants(c.id);
-            });
-        };
-        addDescendants(activeSourceId);
-        list = list.filter(a => descendants.has(a.sourceId));
+        const branch = new Set<string>([activeSourceId]);
+        const findSub = (pid: string) => sources.filter(s => s.parentId === pid).forEach(c => { branch.add(c.id); findSub(c.id); });
+        findSub(activeSourceId);
+        list = list.filter(a => branch.has(a.sourceId));
     }
-    if (activeCategoryId) {
-      list = list.filter(a => a.metadata?.categories.includes(activeCategoryId));
-    }
+    if (activeCategoryId) list = list.filter(a => a.metadata?.categories.includes(activeCategoryId));
     if (searchQuery.trim()) {
       const q = searchQuery.toLowerCase();
       list = list.filter(a => (
-        a.fileName.toLowerCase().includes(q) ||
-        a.metadata?.title.toLowerCase().includes(q) ||
+        a.fileName.toLowerCase().includes(q) || a.metadata?.title.toLowerCase().includes(q) ||
         a.metadata?.authors.some(auth => auth.toLowerCase().includes(q)) ||
-        a.metadata?.journal?.toLowerCase().includes(q) ||
-        a.metadata?.year.toLowerCase().includes(q)
+        a.metadata?.keywords.some(k => k.toLowerCase().includes(q))
       ));
     }
     return [...list];
@@ -242,103 +221,57 @@ const LibrarianApp = () => {
   return (
     <div className="flex h-screen w-screen bg-slate-50 dark:bg-slate-950 font-sans text-slate-900 dark:text-slate-100 overflow-hidden transition-colors duration-200">
       <Sidebar 
-        sources={sources}
-        articles={articles}
-        notes={notes}
-        categories={categories}
-        activeSourceId={activeSourceId}
-        activeCategoryId={activeCategoryId}
-        onSetActiveSource={setActiveSourceId}
-        onSetActiveCategory={setActiveCategoryId}
-        onOpenAddModal={() => setIsAddSourceModalOpen(true)}
-        onOpenGenerateModal={() => setIsGenerateModalOpen(true)}
-        onOpenSettings={() => setIsSettingsOpen(true)}
-        onOpenNote={setSelectedNote}
-        onDeleteSource={handleDeleteSource}
-        isGenerateDisabled={articles.length === 0}
-        onRefreshSource={handleAddSource}
-        onCreateGroup={handleCreateVirtualGroup}
-        onMoveSource={handleAssignFolderToGroup}
+        sources={sources} articles={articles} notes={notes} categories={categories} activeSourceId={activeSourceId} activeCategoryId={activeCategoryId}
+        onSetActiveSource={setActiveSourceId} onSetActiveCategory={setActiveCategoryId} onOpenAddModal={() => setIsAddSourceModalOpen(true)}
+        onOpenGenerateModal={() => setIsGenerateModalOpen(true)} onOpenSettings={() => setIsSettingsOpen(true)} onOpenNote={setSelectedNote}
+        onDeleteSource={handleDeleteSource} isGenerateDisabled={articles.length === 0} onRefreshSource={handleAddSource}
+        onCreateGroup={handleCreateVirtualGroup} onMoveSource={handleAssignFolderToGroup}
       />
 
       <ArticleList 
-        articles={filteredArticles}
-        selectedArticleId={selectedArticleId}
-        onSelectArticle={setSelectedArticleId}
-        checkedArticleIds={checkedArticleIds}
-        onToggleArticle={(id) => setCheckedArticleIds(prev => {
-            const next = new Set(prev);
-            if (next.has(id)) next.delete(id); else next.add(id);
-            return next;
+        articles={filteredArticles} selectedArticleId={selectedArticleId} onSelectArticle={setSelectedArticleId}
+        checkedArticleIds={checkedArticleIds} onToggleArticle={(id) => setCheckedArticleIds(prev => {
+            const next = new Set(prev); if (next.has(id)) next.delete(id); else next.add(id); return next;
         })}
         onToggleAll={(ids) => setCheckedArticleIds(new Set(ids))}
-        searchQuery={searchQuery}
-        onSearchChange={setSearchQuery}
+        searchQuery={searchQuery} onSearchChange={setSearchQuery}
         onSaveSession={() => {
             const blob = new Blob([JSON.stringify({ sources, articles, notes }, null, 2)], { type: 'application/json' });
             const url = URL.createObjectURL(blob);
-            const a = document.createElement('a');
-            a.href = url;
-            a.download = 'librarian_session.json';
-            a.click();
+            const a = document.createElement('a'); a.href = url; a.download = 'library_backup.json'; a.click();
             URL.revokeObjectURL(url);
         }}
         onImportSession={() => {
-            const input = document.createElement('input');
-            input.type = 'file';
-            input.accept = '.json';
+            const input = document.createElement('input'); input.type = 'file'; input.accept = '.json';
             input.onchange = async (e) => {
-              const file = (e.target as HTMLInputElement).files?.[0];
-              if (!file) return;
+              const file = (e.target as HTMLInputElement).files?.[0]; if (!file) return;
               try {
-                const text = await file.text();
-                const data = JSON.parse(text);
-                if (data.articles) {
-                    setSources(data.sources || []);
-                    setArticles(data.articles);
-                    setNotes(data.notes || []);
-                    alert("Import successful. Click Refresh on folders to link your local PDF files.");
-                }
-              } catch (err) { alert("Invalid session file."); }
+                const data = JSON.parse(await file.text());
+                if (data.articles) { setSources(data.sources || []); setArticles(data.articles); setNotes(data.notes || []); alert("Session restored! Metadata is back. Please use 'Sync' on folders to re-link your local PDFs."); }
+              } catch (err) { alert("Invalid backup file."); }
             };
             input.click();
         }}
-        onDeleteSelected={() => {
-            setArticles(prev => prev.filter(a => !checkedArticleIds.has(a.id)));
-            checkedArticleIds.forEach(id => fileMap.current.delete(id));
-            setCheckedArticleIds(new Set());
-        }}
-        isGrouped={isGrouped}
-        onToggleGroup={() => setIsGrouped(!isGrouped)}
-        sortConfig={sortConfig}
-        onSort={(key) => {
-            setSortConfig(curr => curr?.key === key ? { key, direction: curr.direction === 'asc' ? 'desc' : 'asc' } : { key, direction: 'asc' });
-        }}
+        onDeleteSelected={() => { setArticles(prev => prev.filter(a => !checkedArticleIds.has(a.id))); setCheckedArticleIds(new Set()); }}
+        isGrouped={isGrouped} onToggleGroup={() => setIsGrouped(!isGrouped)}
+        sortConfig={sortConfig} onSort={(key) => setSortConfig(curr => curr?.key === key ? { key, direction: curr.direction === 'asc' ? 'desc' : 'asc' } : { key, direction: 'asc' })}
       />
 
       <ArticleDetail 
-        article={articles.find(a => a.id === selectedArticleId)}
-        notes={notes}
-        onClose={() => setSelectedArticleId(null)}
-        onUpdateMetadata={handleUpdateArticle}
-        onEditNote={(n) => { setSelectedNote(null); setIsEditingNote(!!n.id); setActiveEditorNote(n); }}
-        onOpenNote={setSelectedNote}
-        onDeleteNote={(id) => setNotes(prev => prev.filter(n => n.id !== id))}
+        article={articles.find(a => a.id === selectedArticleId)} notes={notes} onClose={() => setSelectedArticleId(null)}
+        onUpdateMetadata={handleUpdateArticle} onEditNote={(n) => { setSelectedNote(null); setIsEditingNote(!!n.id); setActiveEditorNote(n); }}
+        onOpenNote={setSelectedNote} onDeleteNote={(id) => setNotes(prev => prev.filter(n => n.id !== id))}
         getPDF={(id) => fileMap.current.get(id)}
       />
 
       <SettingsModal isOpen={isSettingsOpen} onClose={() => setIsSettingsOpen(false)} currentTheme={theme} onThemeChange={setTheme} />
       <NotebookModal isOpen={isNotebookSetupOpen} onClose={() => setIsNotebookSetupOpen(false)} articles={articles} categories={categories} onConfirm={(type, tid) => setActiveEditorNote({ type, targetId: tid, content: '', title: 'New Note' })} />
-      <AddSourceModal isOpen={isAddSourceModalOpen} onClose={() => setIsAddSourceModalOpen(false)} onAddSource={handleAddSource} onAddPDF={() => alert("Folders can be synced via the Sidebar icons.")} />
-      <GenerateModal isOpen={isGenerateModalOpen} onClose={() => setIsGenerateModalOpen(false)} onConfirm={() => alert("Export started.")} />
+      <AddSourceModal isOpen={isAddSourceModalOpen} onClose={() => setIsAddSourceModalOpen(false)} onAddSource={handleAddSource} onAddPDF={() => alert("Add folders via the sidebar sync for path mapping.")} />
+      <GenerateModal isOpen={isGenerateModalOpen} onClose={() => setIsGenerateModalOpen(false)} onConfirm={() => alert("Export initiated.")} />
       
       {activeEditorNote && <NotebookEditor isOpen={!!activeEditorNote} initialData={activeEditorNote} onClose={() => setActiveEditorNote(null)} onSave={(nd) => {
           const nn = { ...nd, id: nd.id || crypto.randomUUID(), createdAt: nd.createdAt || Date.now() } as Note;
-          setNotes(prev => {
-              const idx = prev.findIndex(x => x.id === nn.id);
-              if (idx !== -1) { const next = [...prev]; next[idx] = nn; return next; }
-              return [...prev, nn];
-          });
+          setNotes(prev => { const idx = prev.findIndex(x => x.id === nn.id); if (idx !== -1) { const next = [...prev]; next[idx] = nn; return next; } return [...prev, nn]; });
       }} isEditing={isEditingNote} />}
 
       <NoteViewerModal note={selectedNote} onClose={() => setSelectedNote(null)} onUpdateTitle={(id, t) => setNotes(prev => prev.map(n => n.id === id ? {...n, title: t} : n))} onDelete={(id) => setNotes(prev => prev.filter(n => n.id !== id))} onEdit={(n) => { setSelectedNote(null); setIsEditingNote(true); setActiveEditorNote(n); }} />
@@ -347,7 +280,7 @@ const LibrarianApp = () => {
           <div className="fixed inset-0 z-[100] bg-black/60 flex items-center justify-center backdrop-blur-sm">
               <div className="bg-white dark:bg-slate-900 p-10 rounded-2xl shadow-2xl flex flex-col items-center border border-slate-200 dark:border-slate-800">
                   <div className="w-16 h-16 border-4 border-indigo-500 border-t-transparent rounded-full animate-spin mb-6"></div>
-                  <p className="text-xl font-bold text-slate-900 dark:text-white uppercase tracking-widest">{loadingMessage}</p>
+                  <p className="text-xl font-bold text-slate-900 dark:text-white tracking-widest uppercase">{loadingMessage}</p>
               </div>
           </div>
       )}
@@ -356,6 +289,6 @@ const LibrarianApp = () => {
 };
 
 const App = () => (
-  <Suspense fallback={<div className="h-screen w-screen flex items-center justify-center bg-slate-50">Initializing...</div>}><LibrarianApp /></Suspense>
+  <Suspense fallback={<div className="h-screen w-screen flex items-center justify-center bg-slate-50">Loading...</div>}><LibrarianApp /></Suspense>
 );
 createRoot(document.getElementById('root')!).render(<App />);

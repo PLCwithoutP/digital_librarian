@@ -19,7 +19,7 @@ export interface Article {
   id: string;
   sourceId: string;
   fileName: string;
-  filePath?: string; // Relative path from upload
+  filePath: string; // Relative path from upload
   fileSize: number;
   addedAt: number;
   metadata?: ArticleMetadata;
