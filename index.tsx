@@ -104,8 +104,8 @@ const LibrarianApp = () => {
             if (!file.name.toLowerCase().endsWith('.pdf')) continue;
             const relativePath = (file as any).webkitRelativePath || file.name;
             
-            // Re-linking logic: Check if we already have metadata for this path/name
-            let existing = articles.find(a => a.filePath === relativePath || (a.fileName === file.name && !a.filePath));
+            // Re-linking logic: Use the original filePath/fileName from session to match
+            let existing = articles.find(a => a.filePath === relativePath || (a.fileName === file.name));
             
             if (existing) {
                 fileMap.current.set(existing.id, file);
@@ -233,11 +233,6 @@ const LibrarianApp = () => {
     setArticles(prev => prev.filter(a => !allSourceIdsToDelete.has(a.sourceId)));
   };
 
-  const handleGenerateConfirm = (options: any) => {
-    // Generate logic remains same but uses list from state
-    alert("Exporting... Check your browser downloads.");
-  };
-
   const filteredArticles = useMemo(() => {
     let list = articles;
     if (activeSourceId) {
@@ -259,11 +254,31 @@ const LibrarianApp = () => {
       list = list.filter(a => (
         a.fileName.toLowerCase().includes(q) ||
         a.metadata?.title.toLowerCase().includes(q) ||
-        a.metadata?.authors.some(auth => auth.toLowerCase().includes(q))
+        a.metadata?.authors.some(auth => auth.toLowerCase().includes(q)) ||
+        a.metadata?.journal?.toLowerCase().includes(q) ||
+        a.metadata?.year.toLowerCase().includes(q) ||
+        a.metadata?.categories.some(c => c.toLowerCase().includes(q)) ||
+        a.metadata?.keywords.some(k => k.toLowerCase().includes(q))
       ));
     }
+
+    if (sortConfig) {
+      list.sort((a, b) => {
+        let valA: any = '', valB: any = '';
+        switch(sortConfig.key) {
+          case 'publication': valA = (a.metadata?.title || a.fileName).toLowerCase(); valB = (b.metadata?.title || b.fileName).toLowerCase(); break;
+          case 'authors': valA = (a.metadata?.authors?.[0] || '').toLowerCase(); valB = (b.metadata?.authors?.[0] || '').toLowerCase(); break;
+          case 'journal': valA = (a.metadata?.journal || '').toLowerCase(); valB = (b.metadata?.journal || '').toLowerCase(); break;
+          case 'year': valA = String(a.metadata?.year || ''); valB = String(b.metadata?.year || ''); break;
+        }
+        if (valA < valB) return sortConfig.direction === 'asc' ? -1 : 1;
+        if (valA > valB) return sortConfig.direction === 'asc' ? 1 : -1;
+        return 0;
+      });
+    }
+
     return [...list];
-  }, [articles, activeSourceId, activeCategoryId, searchQuery, sources]);
+  }, [articles, activeSourceId, activeCategoryId, searchQuery, sources, sortConfig]);
 
   const selectedArticle = useMemo(() => 
     articles.find(a => a.id === selectedArticleId), 
@@ -325,7 +340,7 @@ const LibrarianApp = () => {
                     setSources(data.sources || []);
                     setArticles(data.articles);
                     setNotes(data.notes || []);
-                    alert("Session imported. Please use 'Add Folder' to re-link your local PDF files.");
+                    alert("Session imported. Please use 'Add Folder' or 'Add PDF' to re-link your local PDF files.");
                 }
               } catch (err) { alert("Invalid session file."); }
             };
@@ -358,7 +373,7 @@ const LibrarianApp = () => {
       <SettingsModal isOpen={isSettingsOpen} onClose={() => setIsSettingsOpen(false)} currentTheme={theme} onThemeChange={setTheme} />
       <NotebookModal isOpen={isNotebookSetupOpen} onClose={() => setIsNotebookSetupOpen(false)} articles={articles} categories={categories} onConfirm={(type, tid) => setActiveEditorNote({ type, targetId: tid, content: '', title: 'New Note' })} />
       <AddSourceModal isOpen={isAddSourceModalOpen} onClose={() => setIsAddSourceModalOpen(false)} onAddSource={handleAddSource} onAddPDF={handleAddPDF} />
-      <GenerateModal isOpen={isGenerateModalOpen} onClose={() => setIsGenerateModalOpen(false)} onConfirm={handleGenerateConfirm} />
+      <GenerateModal isOpen={isGenerateModalOpen} onClose={() => setIsGenerateModalOpen(false)} onConfirm={() => alert("Exporting References and Notes...")} />
       
       {activeEditorNote && <NotebookEditor isOpen={!!activeEditorNote} initialData={activeEditorNote} onClose={() => setActiveEditorNote(null)} onSave={(nd) => {
           const nn = { ...nd, id: nd.id || crypto.randomUUID(), createdAt: nd.createdAt || Date.now() } as Note;
