@@ -35,6 +35,7 @@ const SourceTreeItem: React.FC<{
 }> = ({ source, allSources, articles, activeSourceId, depth, onSelect, onDelete, onRefresh, onMove }) => {
   const [isExpanded, setIsExpanded] = useState(true);
   const [isOver, setIsOver] = useState(false);
+  
   const children = allSources.filter(s => s.parentId === source.id);
   const hasChildren = children.length > 0;
   const count = articles.filter(a => a.sourceId === source.id).length;
@@ -46,6 +47,7 @@ const SourceTreeItem: React.FC<{
 
   const handleDragOver = (e: React.DragEvent) => {
     e.preventDefault();
+    // Allow dropping into groups or other folders
     setIsOver(true);
   };
 
@@ -60,7 +62,7 @@ const SourceTreeItem: React.FC<{
 
   return (
     <div 
-      draggable 
+      draggable={!source.isVirtual} 
       onDragStart={handleDragStart}
       onDragOver={handleDragOver}
       onDragLeave={() => setIsOver(false)}
@@ -72,23 +74,35 @@ const SourceTreeItem: React.FC<{
           <div onClick={(e) => { e.stopPropagation(); setIsExpanded(!isExpanded); }} className={`p-1 rounded hover:bg-slate-700 ${hasChildren ? 'visible' : 'invisible'}`}>
              <svg className={`w-3 h-3 transition-transform ${isExpanded ? 'rotate-90' : ''}`} fill="none" stroke="currentColor" viewBox="0 0 24 24"><path d="M9 5l7 7-7 7" strokeWidth={2} /></svg>
           </div>
-          <svg className={`w-4 h-4 shrink-0 ${source.isVirtual ? 'text-indigo-400' : 'text-slate-500'}`} fill="none" stroke="currentColor" viewBox="0 0 24 24"><path d="M3 7v10a2 2 0 002 2h14a2 2 0 002-2V9a2 2 0 00-2-2h-6l-2-2H5a2 2 0 00-2 2z" strokeWidth={2} /></svg>
-          <span className="truncate text-sm ml-1">{source.name}</span>
+          <svg className={`w-4 h-4 shrink-0 ${source.isVirtual ? 'text-indigo-400' : 'text-slate-500'}`} fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            {source.isVirtual ? (
+              <path d="M5 19a2 2 0 01-2-2V7a2 2 0 012-2h4l2 2h4a2 2 0 012 2v1M5 19h14a2 2 0 002-2v-5M5 19l-2-8a2 2 0 012-2h14l2 8" strokeWidth={2} />
+            ) : (
+              <path d="M3 7v10a2 2 0 002 2h14a2 2 0 002-2V9a2 2 0 00-2-2h-6l-2-2H5a2 2 0 00-2 2z" strokeWidth={2} />
+            )}
+          </svg>
+          <span className={`truncate text-sm ml-1 ${source.isVirtual ? 'font-bold' : ''}`}>{source.name}</span>
           <span className="text-[10px] bg-slate-700 px-1.5 py-0.5 rounded-full ml-auto mr-1">{count}</span>
         </div>
         <div className="flex items-center opacity-0 group-hover:opacity-100 transition-opacity pr-1">
           {!source.isVirtual && (
-            <label className="p-1.5 text-slate-400 hover:text-emerald-400 cursor-pointer" title="Refresh / Merge Folder">
+            <label className="p-1.5 text-slate-400 hover:text-emerald-400 cursor-pointer" title="Sync Folder">
               <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" strokeWidth={2} /></svg>
               <input type="file" className="hidden" multiple webkitdirectory="" directory="" onChange={(e) => onRefresh(e, source.id)} />
             </label>
           )}
-          <button onClick={(e) => { e.stopPropagation(); onDelete(source.id); }} className="p-1.5 text-slate-400 hover:text-red-400" title="Delete Folder">
+          <button onClick={(e) => { e.stopPropagation(); onDelete(source.id); }} className="p-1.5 text-slate-400 hover:text-red-400">
              <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" strokeWidth={2} /></svg>
           </button>
         </div>
       </div>
-      {isExpanded && hasChildren && children.map(c => <SourceTreeItem key={c.id} source={c} allSources={allSources} articles={articles} activeSourceId={activeSourceId} depth={depth + 1} onSelect={onSelect} onDelete={onDelete} onRefresh={onRefresh} onMove={onMove} />)}
+      {isExpanded && hasChildren && (
+        <div className="ml-2">
+            {children.map(c => (
+                <SourceTreeItem key={c.id} source={c} allSources={allSources} articles={articles} activeSourceId={activeSourceId} depth={depth + 1} onSelect={onSelect} onDelete={onDelete} onRefresh={onRefresh} onMove={onMove} />
+            ))}
+        </div>
+      )}
     </div>
   );
 };
@@ -96,9 +110,10 @@ const SourceTreeItem: React.FC<{
 export const Sidebar: React.FC<SidebarProps> = ({
   sources, articles, notes = [], categories, activeSourceId, activeCategoryId, onSetActiveSource, onSetActiveCategory, onOpenAddModal, onOpenGenerateModal, onOpenSettings, onOpenNote, onDeleteSource, isGenerateDisabled, onRefreshSource, onCreateGroup, onMoveSource
 }) => {
-  const rootSources = sources.filter(s => !s.parentId);
-  
-  const handleDropRoot = (e: React.DragEvent) => {
+  const groups = sources.filter(s => s.isVirtual);
+  const libraryFolders = sources.filter(s => !s.isVirtual && !s.parentId);
+
+  const handleDropToRoot = (e: React.DragEvent) => {
     e.preventDefault();
     const sid = e.dataTransfer.getData("sourceId");
     if (sid) onMoveSource(sid, null);
@@ -112,40 +127,58 @@ export const Sidebar: React.FC<SidebarProps> = ({
           Librarian
         </h1>
       </div>
-      <nav 
-        className="flex-1 overflow-y-auto py-4"
-        onDragOver={(e) => e.preventDefault()}
-        onDrop={handleDropRoot}
-      >
-        <div className="flex items-center justify-between px-6 mb-2">
-            <span className="text-xs font-semibold uppercase text-slate-500">Library</span>
-            <button onClick={onCreateGroup} className="text-[10px] bg-slate-800 hover:bg-slate-700 px-1.5 py-0.5 rounded text-indigo-300 font-bold border border-slate-700">Group +</button>
-        </div>
-        <button onClick={() => { onSetActiveSource(null); onSetActiveCategory(null); }} className={`w-full text-left px-6 py-2 flex justify-between hover:bg-slate-800 ${!activeSourceId && !activeCategoryId ? 'bg-slate-800 text-white' : ''}`}>
-           <span className="text-sm">All Articles</span>
+      
+      <nav className="flex-1 overflow-y-auto py-4" onDragOver={(e) => e.preventDefault()} onDrop={handleDropToRoot}>
+        {/* Quick Filter */}
+        <button onClick={() => { onSetActiveSource(null); onSetActiveCategory(null); }} className={`w-full text-left px-6 py-3 flex justify-between hover:bg-slate-800 mb-4 transition-colors ${!activeSourceId && !activeCategoryId ? 'bg-slate-800 text-white' : ''}`}>
+           <span className="text-sm font-semibold">All Documents</span>
            <span className="text-xs bg-slate-700 px-2 py-0.5 rounded-full">{articles.length}</span>
         </button>
-        <div className="mt-4">{rootSources.map(s => <SourceTreeItem key={s.id} source={s} allSources={sources} articles={articles} activeSourceId={activeSourceId} depth={0} onSelect={onSetActiveSource} onDelete={onDeleteSource} onRefresh={onRefreshSource} onMove={onMoveSource} />)}</div>
+
+        {/* Groups Section */}
+        <div className="mb-6">
+            <div className="flex items-center justify-between px-6 mb-2">
+                <span className="text-[10px] font-bold uppercase text-slate-500 tracking-wider">Groups</span>
+                <button onClick={onCreateGroup} className="text-[10px] bg-slate-800 hover:bg-slate-700 px-2 py-0.5 rounded text-indigo-300 border border-slate-700">Add Group</button>
+            </div>
+            {groups.length === 0 ? (
+                <div className="px-6 py-2 text-[10px] italic text-slate-600">No groups created.</div>
+            ) : (
+                groups.map(g => (
+                    <SourceTreeItem key={g.id} source={g} allSources={sources} articles={articles} activeSourceId={activeSourceId} depth={0} onSelect={onSetActiveSource} onDelete={onDeleteSource} onRefresh={onRefreshSource} onMove={onMoveSource} />
+                ))
+            )}
+        </div>
+
+        {/* Library Section */}
+        <div className="mb-6">
+            <div className="px-6 mb-2">
+                <span className="text-[10px] font-bold uppercase text-slate-500 tracking-wider">Library Folders</span>
+            </div>
+            {libraryFolders.map(s => (
+                <SourceTreeItem key={s.id} source={s} allSources={sources} articles={articles} activeSourceId={activeSourceId} depth={0} onSelect={onSetActiveSource} onDelete={onDeleteSource} onRefresh={onRefreshSource} onMove={onMoveSource} />
+            ))}
+        </div>
         
+        {/* Labels Section */}
         {categories.length > 0 && (
-          <div className="mt-6 border-t border-slate-800 pt-4">
-            <div className="px-6 mb-2 text-xs font-semibold uppercase text-slate-500">Categories</div>
+          <div className="mt-8 border-t border-slate-800 pt-4">
+            <div className="px-6 mb-2 text-[10px] font-bold uppercase text-slate-500 tracking-wider">Labels</div>
             {categories.map(cat => (
-              <button 
-                key={cat} 
-                onClick={() => onSetActiveCategory(activeCategoryId === cat ? null : cat)} 
-                className={`w-full text-left px-6 py-1.5 text-xs hover:bg-slate-800 transition-colors ${activeCategoryId === cat ? 'bg-indigo-900/40 text-white border-l-2 border-indigo-500' : 'text-slate-400'}`}
-              >
+              <button key={cat} onClick={() => onSetActiveCategory(activeCategoryId === cat ? null : cat)} className={`w-full text-left px-6 py-1.5 text-xs hover:bg-slate-800 transition-colors ${activeCategoryId === cat ? 'bg-indigo-900/40 text-white border-l-2 border-indigo-500' : 'text-slate-400'}`}>
                 {cat}
               </button>
             ))}
           </div>
         )}
       </nav>
+
       <div className="p-4 border-t border-slate-800 space-y-2">
-        <button onClick={onOpenAddModal} className="w-full bg-indigo-600 hover:bg-indigo-700 text-white font-medium py-2 rounded-lg shadow-lg transition-transform active:scale-95 flex items-center justify-center gap-2"><svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path d="M12 4v16m8-8H4" strokeWidth={2} /></svg>Add Folder</button>
-        <button onClick={onOpenGenerateModal} disabled={isGenerateDisabled} className="w-full bg-emerald-600 hover:bg-emerald-700 disabled:bg-slate-800 disabled:text-slate-600 text-white font-medium py-2 rounded-lg transition-colors flex items-center justify-center gap-2"><svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path d="M13 10V3L4 14h7v7l9-11h-7z" strokeWidth={2} /></svg>Generate</button>
-        <button onClick={onOpenSettings} className="w-full bg-slate-800 hover:bg-slate-700 text-slate-300 font-medium py-2 rounded-lg transition-colors border border-slate-700 flex items-center justify-center gap-2"><svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.065 2.572c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.572 1.065c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.065-2.572c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z" strokeWidth={2} /></svg>Settings</button>
+        <button onClick={onOpenAddModal} className="w-full bg-indigo-600 hover:bg-indigo-700 text-white font-bold py-2.5 rounded-lg shadow-lg transition-all active:scale-95 flex items-center justify-center gap-2">
+          <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path d="M12 4v16m8-8H4" strokeWidth={2} /></svg>
+          Import Folder
+        </button>
+        <button onClick={onOpenSettings} className="w-full bg-slate-800 hover:bg-slate-700 text-slate-300 font-medium py-2 rounded-lg transition-colors border border-slate-700">Settings</button>
       </div>
     </aside>
   );

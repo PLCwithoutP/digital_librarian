@@ -80,22 +80,18 @@ const LibrarianApp = () => {
     const files = e.target.files;
     if (!files || files.length === 0) return;
     setIsLoading(true);
-    setLoadingMessage(refreshSourceId ? 'Syncing folder...' : 'Linking folder contents...');
+    setLoadingMessage(refreshSourceId ? 'Syncing library content...' : 'Indexing folder...');
     
     try {
         const fileList: File[] = Array.from(files);
         const newSources: Source[] = [];
-        const newArticles: Article[] = [];
+        const newArticlesList: Article[] = [];
 
-        // Build a path map for existing sources to avoid duplicates
-        // Note: Sources added via directory upload often have a name corresponding to folder parts.
-        const existingSources = [...sources];
-        
+        // Recursive source builder
         const getOrCreateSource = (folderName: string, parentId: string | undefined): string => {
-            let existing = existingSources.find(s => s.name === folderName && s.parentId === parentId);
-            if (!existing) {
-                existing = newSources.find(s => s.name === folderName && s.parentId === parentId);
-            }
+            let existing = sources.find(s => s.name === folderName && s.parentId === parentId);
+            if (!existing) existing = newSources.find(s => s.name === folderName && s.parentId === parentId);
+            
             if (existing) return existing.id;
 
             const id = crypto.randomUUID();
@@ -104,29 +100,34 @@ const LibrarianApp = () => {
             return id;
         };
 
+        let newCount = 0;
+        let updateCount = 0;
+
         for (const file of fileList) {
             if (!file.name.toLowerCase().endsWith('.pdf')) continue;
             const relativePath = (file as any).webkitRelativePath || file.name;
             
-            // Re-linking existing articles in the session
-            let existing = articles.find(a => a.filePath === relativePath || (a.fileName === file.name && !a.filePath));
+            // SMART MERGE: Match by Relative Path
+            let existingArticle = articles.find(a => a.filePath === relativePath);
             
-            if (existing) {
-                fileMap.current.set(existing.id, file);
+            if (existingArticle) {
+                // Just update the File reference in memory
+                fileMap.current.set(existingArticle.id, file);
+                updateCount++;
                 continue;
             }
 
-            // If it's a new file, create Source hierarchy
+            // Create source hierarchy for truly new files
             const pathParts = relativePath.split('/');
-            let currentParentId: string | undefined = undefined;
+            let currentParentId: string | undefined = refreshSourceId || undefined;
 
             if (pathParts.length > 1) {
                 const folders = pathParts.slice(0, -1);
                 for (const folderName of folders) {
                     currentParentId = getOrCreateSource(folderName, currentParentId);
                 }
-            } else {
-                currentParentId = getOrCreateSource("Imported Files", undefined);
+            } else if (!refreshSourceId) {
+                currentParentId = getOrCreateSource("Root Imports", undefined);
             }
 
             const articleId = crypto.randomUUID();
@@ -141,18 +142,19 @@ const LibrarianApp = () => {
                 metadata: createMetadata(file)
             };
             fileMap.current.set(articleId, file);
-            newArticles.push(newArt);
+            newArticlesList.push(newArt);
+            newCount++;
         }
 
-        setSources(prev => [...prev, ...newSources]);
-        setArticles(prev => [...prev, ...newArticles]);
+        if (newSources.length > 0) setSources(prev => [...prev, ...newSources]);
+        if (newArticlesList.length > 0) setArticles(prev => [...prev, ...newArticlesList]);
         
         if (refreshSourceId) {
-            alert(`Sync complete! ${newArticles.length} new articles found. Existing articles re-linked.`);
+            alert(`Sync Finished!\nFound ${newCount} new documents.\nRe-linked ${updateCount} existing documents.`);
         }
     } catch (err) {
         console.error(err);
-        alert("Refresh failed. Ensure you picked the correct root directory.");
+        alert("Action failed. Please check browser permissions for local file access.");
     } finally {
         setIsLoading(false);
         if (e.target) e.target.value = "";
@@ -160,11 +162,11 @@ const LibrarianApp = () => {
   };
 
   const handleCreateVirtualGroup = () => {
-    const name = window.prompt("Enter group name:");
-    if (!name) return;
+    const name = window.prompt("Enter Group name:");
+    if (!name || !name.trim()) return;
     const newGroup: Source = {
       id: crypto.randomUUID(),
-      name,
+      name: name.trim(),
       isVirtual: true,
       order: sources.length
     };
@@ -172,21 +174,32 @@ const LibrarianApp = () => {
   };
 
   const handleMoveSource = (sourceId: string, targetParentId: string | null) => {
-    // Avoid circular nesting (moving a folder into its own child)
-    const isDescendant = (parent: string, child: string): boolean => {
-        const c = sources.find(s => s.id === child);
-        if (!c || !c.parentId) return false;
-        if (c.parentId === parent) return true;
-        return isDescendant(parent, c.parentId);
-    };
-
     if (sourceId === targetParentId) return;
-    if (targetParentId && isDescendant(sourceId, targetParentId)) {
-        alert("Cannot move a folder into its own subfolder.");
-        return;
-    }
 
-    setSources(prev => prev.map(s => s.id === sourceId ? { ...s, parentId: targetParentId || undefined } : s));
+    setSources(prev => {
+        const sourceToMove = prev.find(s => s.id === sourceId);
+        if (!sourceToMove) return prev;
+        
+        // Prevent moving a Virtual Group into anything else
+        if (sourceToMove.isVirtual && targetParentId !== null) {
+            alert("Groups must remain at the top level.");
+            return prev;
+        }
+
+        // Cycle check: moving a folder into its own descendant
+        const isDescendant = (parent: string, child: string): boolean => {
+            const c = prev.find(s => s.id === child);
+            if (!c || !c.parentId) return false;
+            if (c.parentId === parent) return true;
+            return isDescendant(parent, c.parentId);
+        };
+        if (targetParentId && isDescendant(sourceId, targetParentId)) {
+            alert("Cannot move a folder into its own subfolder.");
+            return prev;
+        }
+
+        return prev.map(s => s.id === sourceId ? { ...s, parentId: targetParentId || undefined } : s);
+    });
   };
 
   const handleUpdateArticle = (id: string, updates: Partial<ArticleMetadata>) => {
@@ -200,17 +213,24 @@ const LibrarianApp = () => {
   };
 
   const handleDeleteSource = (id: string) => {
-    if (!window.confirm("Remove this folder/group and all its contents?")) return;
-    const allSourceIdsToDelete = new Set<string>();
-    const collectIds = (sid: string) => {
-        allSourceIdsToDelete.add(sid);
-        sources.filter(s => s.parentId === sid).forEach(c => collectIds(c.id));
-    };
-    collectIds(id);
-    const articlesToRemove = articles.filter(a => allSourceIdsToDelete.has(a.sourceId));
-    articlesToRemove.forEach(a => fileMap.current.delete(a.id));
-    setSources(prev => prev.filter(s => !allSourceIdsToDelete.has(s.id)));
-    setArticles(prev => prev.filter(a => !allSourceIdsToDelete.has(a.sourceId)));
+    const source = sources.find(s => s.id === id);
+    const msg = source?.isVirtual ? "Delete this group? (Folders inside will be moved to root)" : "Remove this folder and all documents inside?";
+    if (!window.confirm(msg)) return;
+
+    if (source?.isVirtual) {
+        setSources(prev => prev.filter(s => s.id !== id).map(s => s.parentId === id ? { ...s, parentId: undefined } : s));
+    } else {
+        const allSourceIdsToDelete = new Set<string>();
+        const collectIds = (sid: string) => {
+            allSourceIdsToDelete.add(sid);
+            sources.filter(s => s.parentId === sid).forEach(c => collectIds(c.id));
+        };
+        collectIds(id);
+        const articlesToRemove = articles.filter(a => allSourceIdsToDelete.has(a.sourceId));
+        articlesToRemove.forEach(a => fileMap.current.delete(a.id));
+        setSources(prev => prev.filter(s => !allSourceIdsToDelete.has(s.id)));
+        setArticles(prev => prev.filter(a => !allSourceIdsToDelete.has(a.sourceId)));
+    }
   };
 
   const filteredArticles = useMemo(() => {
@@ -300,7 +320,7 @@ const LibrarianApp = () => {
                     setSources(data.sources || []);
                     setArticles(data.articles);
                     setNotes(data.notes || []);
-                    alert("Session imported. Click 'Refresh' on folders to re-link your local PDF files.");
+                    alert("Import successful. Click Refresh on folders to re-link your local PDF files.");
                 }
               } catch (err) { alert("Invalid session file."); }
             };
@@ -332,8 +352,8 @@ const LibrarianApp = () => {
 
       <SettingsModal isOpen={isSettingsOpen} onClose={() => setIsSettingsOpen(false)} currentTheme={theme} onThemeChange={setTheme} />
       <NotebookModal isOpen={isNotebookSetupOpen} onClose={() => setIsNotebookSetupOpen(false)} articles={articles} categories={categories} onConfirm={(type, tid) => setActiveEditorNote({ type, targetId: tid, content: '', title: 'New Note' })} />
-      <AddSourceModal isOpen={isAddSourceModalOpen} onClose={() => setIsAddSourceModalOpen(false)} onAddSource={handleAddSource} onAddPDF={(e) => alert("Individual PDF linking is handled via Folder Merge logic.")} />
-      <GenerateModal isOpen={isGenerateModalOpen} onClose={() => setIsGenerateModalOpen(false)} onConfirm={() => alert("Check downloads for your export.")} />
+      <AddSourceModal isOpen={isAddSourceModalOpen} onClose={() => setIsAddSourceModalOpen(false)} onAddSource={handleAddSource} onAddPDF={() => alert("Add PDFs via 'Import Folder' for full tree support.")} />
+      <GenerateModal isOpen={isGenerateModalOpen} onClose={() => setIsGenerateModalOpen(false)} onConfirm={() => alert("Export initiated.")} />
       
       {activeEditorNote && <NotebookEditor isOpen={!!activeEditorNote} initialData={activeEditorNote} onClose={() => setActiveEditorNote(null)} onSave={(nd) => {
           const nn = { ...nd, id: nd.id || crypto.randomUUID(), createdAt: nd.createdAt || Date.now() } as Note;
@@ -347,10 +367,10 @@ const LibrarianApp = () => {
       <NoteViewerModal note={selectedNote} onClose={() => setSelectedNote(null)} onUpdateTitle={(id, t) => setNotes(prev => prev.map(n => n.id === id ? {...n, title: t} : n))} onDelete={(id) => setNotes(prev => prev.filter(n => n.id !== id))} onEdit={(n) => { setSelectedNote(null); setIsEditingNote(true); setActiveEditorNote(n); }} />
       
       {isLoading && (
-          <div className="fixed inset-0 z-[100] bg-black/50 flex items-center justify-center">
-              <div className="bg-white dark:bg-slate-900 p-8 rounded-xl shadow-2xl flex flex-col items-center">
-                  <div className="w-12 h-12 border-4 border-indigo-500 border-t-transparent rounded-full animate-spin mb-4"></div>
-                  <p className="text-lg font-bold text-slate-900 dark:text-white">{loadingMessage}</p>
+          <div className="fixed inset-0 z-[100] bg-black/60 flex items-center justify-center backdrop-blur-sm">
+              <div className="bg-white dark:bg-slate-900 p-10 rounded-2xl shadow-2xl flex flex-col items-center border border-slate-200 dark:border-slate-800">
+                  <div className="w-16 h-16 border-4 border-indigo-500 border-t-transparent rounded-full animate-spin mb-6"></div>
+                  <p className="text-xl font-bold text-slate-900 dark:text-white uppercase tracking-widest">{loadingMessage}</p>
               </div>
           </div>
       )}

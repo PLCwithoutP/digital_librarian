@@ -81,11 +81,6 @@ export const ArticleDetail: React.FC<ArticleDetailProps> = ({
 
   useEffect(() => () => { if (pdfUrl) URL.revokeObjectURL(pdfUrl); }, [pdfUrl]);
 
-  const articleNotes = useMemo(() => {
-    if (!article) return [];
-    return notes.filter(n => n.type === 'article' && n.targetId === article.id);
-  }, [notes, article]);
-
   if (!article) return null;
 
   const handleLoadPdf = () => {
@@ -96,7 +91,7 @@ export const ArticleDetail: React.FC<ArticleDetailProps> = ({
         const blob = new Blob([file], { type: 'application/pdf' });
         setPdfUrl(URL.createObjectURL(blob));
     } else {
-        alert("File link missing! Click 'Refresh' in the sidebar on the original folder to re-link your local PDF files.");
+        alert("File link broken! Click the Sync icon on the folder in the sidebar and re-select the directory to link your local PDF files.");
     }
     setIsLoadingPdf(false);
   };
@@ -130,13 +125,13 @@ export const ArticleDetail: React.FC<ArticleDetailProps> = ({
   };
 
   const EditableField = ({ label, value, isEditing, setIsEditing, inputValue, setInputValue, onSave, multiline = false, w = "w-16" }: any) => (
-    <div className="text-sm flex gap-2 items-start">
+    <div className="text-sm flex gap-2 items-start group/field">
       <span className={`font-semibold shrink-0 text-slate-500 mt-1 ${w}`}>{label}:</span>
       {isEditing ? (
         multiline ? (
           <textarea 
             autoFocus 
-            className="flex-1 bg-slate-100 dark:bg-slate-800 border-2 border-indigo-500 rounded p-1 text-sm text-slate-900 dark:text-slate-100 outline-none min-h-[120px]" 
+            className="flex-1 bg-slate-100 dark:bg-slate-800 border-2 border-indigo-500 rounded p-1.5 text-sm text-slate-900 dark:text-white outline-none min-h-[140px] shadow-inner" 
             value={inputValue} 
             onChange={e => setInputValue(e.target.value)} 
             onBlur={() => { onSave(); setIsEditing(false); }} 
@@ -144,15 +139,15 @@ export const ArticleDetail: React.FC<ArticleDetailProps> = ({
         ) : (
           <input 
             autoFocus 
-            className="flex-1 bg-slate-100 dark:bg-slate-800 border-b-2 border-indigo-500 outline-none text-sm text-slate-900 dark:text-slate-100 px-1 py-1" 
+            className="flex-1 bg-slate-100 dark:bg-slate-800 border-b-2 border-indigo-500 outline-none text-sm text-slate-900 dark:text-white px-1.5 py-1 shadow-inner font-medium" 
             value={inputValue} 
             onChange={e => setInputValue(e.target.value)} 
             onBlur={() => { onSave(); setIsEditing(false); }} 
           />
         )
       ) : (
-        <span className="flex-1 cursor-pointer hover:text-indigo-600 transition-colors break-words text-slate-800 dark:text-slate-200 py-1" onClick={() => setIsEditing(true)}>
-            {value || <span className="text-slate-400 italic">Empty</span>}
+        <span className="flex-1 cursor-pointer hover:text-indigo-600 dark:hover:text-indigo-400 transition-colors break-words text-slate-800 dark:text-slate-200 py-1" onClick={() => setIsEditing(true)}>
+            {value || <span className="text-slate-400 italic text-xs">Edit Field</span>}
         </span>
       )}
     </div>
@@ -161,20 +156,23 @@ export const ArticleDetail: React.FC<ArticleDetailProps> = ({
   return (
     <div className={`fixed inset-y-0 right-0 ${pdfUrl ? 'w-[94vw]' : 'w-[450px]'} bg-white dark:bg-slate-900 shadow-2xl transition-all duration-300 border-l border-slate-200 dark:border-slate-800 flex flex-col z-20`}>
         <div className="p-4 border-b border-slate-100 dark:border-slate-800 flex items-center justify-between bg-slate-50 dark:bg-slate-900 shrink-0">
-            <h2 className="text-xs font-bold uppercase tracking-widest text-slate-500">Metadata & Reader</h2>
+            <h2 className="text-xs font-bold uppercase tracking-widest text-slate-500 flex items-center gap-2">
+                <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" strokeWidth={2} /></svg>
+                Document Details
+            </h2>
             <div className="flex items-center gap-2">
-                {pdfUrl && <button onClick={() => setPdfUrl(null)} className="text-xs px-3 py-1 bg-slate-200 dark:bg-slate-700 rounded text-slate-700 dark:text-slate-200 hover:bg-slate-300 transition-colors font-bold">Close Reader</button>}
-                <button onClick={onClose} className="text-slate-400 hover:text-slate-600 p-1"><svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" /></svg></button>
+                {pdfUrl && <button onClick={() => setPdfUrl(null)} className="text-xs px-4 py-1.5 bg-indigo-600 text-white rounded-md hover:bg-indigo-700 transition-colors font-bold shadow-md">Close PDF</button>}
+                <button onClick={onClose} className="text-slate-400 hover:text-slate-600 p-1 rounded-full hover:bg-slate-100 dark:hover:bg-slate-800 transition-colors"><svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" /></svg></button>
             </div>
         </div>
-        <div className="flex-1 flex overflow-hidden">
+        <div className="flex-1 flex overflow-hidden bg-slate-50/50 dark:bg-slate-950/50">
             <div className={`flex-1 overflow-y-auto p-8 bg-white dark:bg-slate-900 ${pdfUrl ? 'max-w-[420px] border-r border-slate-200 dark:border-slate-800' : ''}`}>
-                <div className="space-y-6">
+                <div className="space-y-8">
                     <header>
                         {isEditingTitle ? (
-                           <textarea autoFocus className="w-full text-xl font-bold bg-slate-100 dark:bg-slate-800 text-slate-900 dark:text-slate-100 border-2 border-indigo-500 rounded p-2 focus:outline-none" value={titleInput} onChange={e => setTitleInput(e.target.value)} onBlur={() => { onUpdateMetadata(article.id, { title: titleInput }); setIsEditingTitle(false); }} />
+                           <textarea autoFocus className="w-full text-xl font-bold bg-slate-100 dark:bg-slate-800 text-slate-900 dark:text-white border-2 border-indigo-500 rounded p-2 focus:outline-none shadow-inner" value={titleInput} onChange={e => setTitleInput(e.target.value)} onBlur={() => { onUpdateMetadata(article.id, { title: titleInput }); setIsEditingTitle(false); }} />
                         ) : (
-                           <h3 className="text-xl font-bold text-slate-900 dark:text-slate-100 mb-2 cursor-pointer hover:text-indigo-600 leading-tight" onClick={() => setIsEditingTitle(true)}>{article.metadata?.title || article.fileName}</h3>
+                           <h3 className="text-xl font-bold text-slate-900 dark:text-slate-100 mb-2 cursor-pointer hover:text-indigo-600 dark:hover:text-indigo-400 leading-tight" onClick={() => setIsEditingTitle(true)}>{article.metadata?.title || article.fileName}</h3>
                         )}
                         <div className="space-y-3 mt-6">
                             <EditableField label="Authors" value={article.metadata?.authors?.join(', ')} isEditing={isEditingAuthors} setIsEditing={setIsEditingAuthors} inputValue={authorsInput} setInputValue={setAuthorsInput} onSave={() => onUpdateMetadata(article.id, { authors: authorsInput.split(/[,;]/).map(s => s.trim()).filter(x => x) })} />
@@ -188,13 +186,11 @@ export const ArticleDetail: React.FC<ArticleDetailProps> = ({
                                 <EditableField label="Pages" value={article.metadata?.pages} isEditing={isEditingPages} setIsEditing={setIsEditingPages} inputValue={pagesInput} setInputValue={setPagesInput} onSave={() => onUpdateMetadata(article.id, { pages: pagesInput })} />
                             </div>
                             <EditableField label="DOI" value={article.metadata?.doi} isEditing={isEditingDoi} setIsEditing={setIsEditingDoi} inputValue={doiInput} setInputValue={setDoiInput} onSave={() => onUpdateMetadata(article.id, { doi: doiInput })} />
-                            <EditableField label="URL" value={article.metadata?.url} isEditing={isEditingUrl} setIsEditing={setIsEditingUrl} inputValue={urlInput} setInputValue={setUrlInput} onSave={() => onUpdateMetadata(article.id, { url: urlInput })} />
-                            <EditableField label="Abstract" value={article.metadata?.abstract} isEditing={isEditingAbstract} setIsEditing={setIsEditingAbstract} inputValue={abstractInput} setInputValue={setAbstractInput} multiline onSave={() => onUpdateMetadata(article.id, { abstract: abstractInput })} />
                         </div>
                     </header>
 
                     <div className="pt-6 border-t border-slate-100 dark:border-slate-800">
-                        <h4 className="text-xs font-bold uppercase text-slate-500 mb-3 tracking-widest">Categories</h4>
+                        <h4 className="text-xs font-bold uppercase text-slate-500 mb-3 tracking-widest">Labels</h4>
                         <div className="flex flex-wrap gap-2 mb-3">
                             {article.metadata?.categories.map(cat => (
                                 <span key={cat} className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded text-xs font-medium border shadow-sm ${getCategoryStyle(cat)}`}>
@@ -206,63 +202,25 @@ export const ArticleDetail: React.FC<ArticleDetailProps> = ({
                             ))}
                         </div>
                         <div className="flex gap-2">
-                            <input 
-                                type="text" 
-                                placeholder="Add category..." 
-                                className="flex-1 text-xs bg-slate-100 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded px-2 py-1.5 text-slate-900 dark:text-slate-100 outline-none focus:ring-1 focus:ring-indigo-500"
-                                value={newCategory}
-                                onChange={(e) => setNewCategory(e.target.value)}
-                                onKeyDown={(e) => e.key === 'Enter' && handleAddCategory()}
-                            />
+                            <input type="text" placeholder="Add Label..." className="flex-1 text-xs bg-slate-100 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded px-2 py-1.5 text-slate-900 dark:text-white outline-none focus:ring-1 focus:ring-indigo-500" value={newCategory} onChange={(e) => setNewCategory(e.target.value)} onKeyDown={(e) => e.key === 'Enter' && handleAddCategory()} />
                             <button onClick={handleAddCategory} className="px-3 py-1 bg-indigo-600 text-white rounded text-xs font-bold hover:bg-indigo-700 transition-colors shadow-sm">Add</button>
-                        </div>
-                    </div>
-
-                    <div className="pt-6 border-t border-slate-100 dark:border-slate-800">
-                        <h4 className="text-xs font-bold uppercase text-slate-500 mb-3 tracking-widest">Keywords</h4>
-                        <div className="flex flex-wrap gap-1.5 mb-3">
-                            {article.metadata?.keywords?.length ? article.metadata.keywords.map(kw => (
-                                <span key={kw} className="inline-flex items-center gap-1 px-2 py-0.5 rounded bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-300 text-[10px] border border-slate-200 dark:border-slate-700 shadow-sm">
-                                    {kw}
-                                    <button onClick={() => handleRemoveKeyword(kw)} className="hover:text-red-500 transition-colors">
-                                        <svg className="w-2.5 h-2.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={3} d="M6 18L18 6M6 6l12 12" /></svg>
-                                    </button>
-                                </span>
-                            )) : <span className="text-xs italic text-slate-400">No keywords</span>}
-                        </div>
-                        <div className="flex gap-2">
-                            <input 
-                                type="text" 
-                                placeholder="Add keyword..." 
-                                className="flex-1 text-xs bg-slate-100 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded px-2 py-1.5 text-slate-900 dark:text-slate-100 outline-none focus:ring-1 focus:ring-indigo-500"
-                                value={newKeyword}
-                                onChange={(e) => setNewKeyword(e.target.value)}
-                                onKeyDown={(e) => e.key === 'Enter' && handleAddKeyword()}
-                            />
-                            <button onClick={handleAddKeyword} className="px-3 py-1 bg-slate-700 text-white rounded text-xs font-bold hover:bg-slate-600 transition-colors shadow-sm">Add</button>
                         </div>
                     </div>
 
                     <div className="pt-6 space-y-2 pb-12">
                         <button onClick={handleLoadPdf} disabled={isLoadingPdf} className="w-full py-4 bg-indigo-600 hover:bg-indigo-700 text-white font-bold rounded-xl shadow-lg transition-all active:scale-95 flex items-center justify-center gap-2">
                             <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" /><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z" /></svg>
-                            {isLoadingPdf ? "Opening..." : "Read PDF"}
+                            {isLoadingPdf ? "Opening Viewer..." : "Read PDF"}
                         </button>
                     </div>
                 </div>
             </div>
             {pdfUrl && (
               <div className="flex-1 bg-slate-200 h-full relative border-l border-slate-300 dark:border-slate-700">
-                <object 
-                    data={pdfUrl} 
-                    type="application/pdf" 
-                    className="w-full h-full"
-                >
+                <object data={pdfUrl} type="application/pdf" className="w-full h-full">
                     <div className="flex flex-col items-center justify-center h-full bg-slate-100 dark:bg-slate-800 text-slate-500 dark:text-slate-400 p-12 text-center">
-                        <svg className="w-16 h-16 mb-4 opacity-20" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1} d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" /></svg>
-                        <p className="font-bold mb-2">Preview Unavailable</p>
-                        <p className="text-sm mb-6">Your browser security settings might prevent previewing this local blob.</p>
-                        <a href={pdfUrl} target="_blank" rel="noreferrer" className="px-6 py-2 bg-indigo-600 text-white rounded-lg font-bold shadow-md hover:bg-indigo-700 transition-colors">Open PDF Separately</a>
+                        <p className="font-bold mb-2">Browser Preview Blocked</p>
+                        <a href={pdfUrl} target="_blank" rel="noreferrer" className="px-6 py-2 bg-indigo-600 text-white rounded-lg font-bold shadow-md">Open in External Tab</a>
                     </div>
                 </object>
               </div>
