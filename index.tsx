@@ -24,7 +24,7 @@ const LibrarianApp = () => {
   const [sortConfig, setSortConfig] = useState<{ key: string; direction: 'asc' | 'desc' } | null>(null);
   const [checkedArticleIds, setCheckedArticleIds] = useState<Set<string>>(new Set<string>());
   
-  // The registry that links an Article ID (from metadata) to a live browser File object.
+  // This registry links an Article ID to a live browser File object.
   const fileMap = useRef<Map<string, File>>(new Map());
   const [, setFileTick] = useState(0);
 
@@ -78,29 +78,40 @@ const LibrarianApp = () => {
     bibtex: ""
   });
 
-  /**
-   * CORE LOGIC: Path-to-ID Registry
-   * Matches incoming files to existing metadata based on unique filePaths.
-   */
   const handleAddSource = async (e: React.ChangeEvent<HTMLInputElement>, refreshSourceId?: string) => {
     const files = e.target.files;
     if (!files || files.length === 0) return;
 
-    if (refreshSourceId && !window.confirm("Do you want to refresh this folder and re-link files? Existing metadata will be preserved.")) {
+    if (refreshSourceId && !window.confirm("Refresh this folder? Metadata for existing paths will be preserved. New files will be added. Missing files will be removed.")) {
       return;
     }
 
     setIsLoading(true);
-    setLoadingMessage(refreshSourceId ? 'Re-linking physical files...' : 'Mapping library paths...');
+    setLoadingMessage(refreshSourceId ? 'Syncing paths...' : 'Mapping folder...');
     
     try {
         const fileList: File[] = Array.from(files);
         const newSources: Source[] = [];
-        const newArticlesList: Article[] = [];
+        const finalArticles: Article[] = [...articles];
         
-        // Build a registry of current paths to avoid duplicates and allow re-linking
-        const pathRegistry = new Map<string, string>(); // filePath -> ArticleID
-        articles.forEach(a => pathRegistry.set(a.filePath, a.id));
+        // When refreshing, we need to know which articles belonged to the original root source tree
+        const getDescendantSourceIds = (id: string): string[] => {
+            const results = [id];
+            sources.filter(s => s.parentId === id).forEach(child => {
+                results.push(...getDescendantSourceIds(child.id));
+            });
+            return results;
+        };
+
+        const refreshedSourceIds = refreshSourceId ? getDescendantSourceIds(refreshSourceId) : [];
+        const refreshedPathsInState = new Map<string, Article>();
+        if (refreshSourceId) {
+            articles.forEach(a => {
+                if (refreshedSourceIds.includes(a.sourceId)) {
+                    refreshedPathsInState.set(a.filePath, a);
+                }
+            });
+        }
 
         const getOrCreateSource = (folderName: string, parentId: string | undefined): string => {
             let existing = sources.find(s => s.name === folderName && s.parentId === parentId);
@@ -112,34 +123,45 @@ const LibrarianApp = () => {
             return id;
         };
 
-        let newEntriesCount = 0;
+        const processedPathsInNewScan = new Set<string>();
         let reLinkedCount = 0;
+        let newAddedCount = 0;
 
         for (const file of fileList) {
             if (!file.name.toLowerCase().endsWith('.pdf')) continue;
-            const relativePath = (file as any).webkitRelativePath || file.name;
+            let relativePath = (file as any).webkitRelativePath || file.name;
+
+            // If we're refreshing a specific folder, let's normalize the path.
+            // If user selects "MyDocs" folder and it contains "Doc1.pdf", 
+            // webkitRelativePath is "MyDocs/Doc1.pdf".
+            // If our state already knows this path, we link it.
             
-            // CHECK REGISTRY
-            const existingId = pathRegistry.get(relativePath);
-            
-            if (existingId) {
-                // PATH MATCH FOUND: Update the memory pointer to the actual File object
-                fileMap.current.set(existingId, file);
+            processedPathsInNewScan.add(relativePath);
+
+            // 1. Check if this path exists anywhere in our state
+            const existingInState = articles.find(a => a.filePath === relativePath);
+
+            if (existingInState) {
+                // Path match! Project existing metadata onto the new physical file
+                fileMap.current.set(existingInState.id, file);
                 reLinkedCount++;
                 continue;
             }
 
-            // PATH IS NEW: Create new metadata entry
+            // 2. Not in state: Add as new
             const pathParts = relativePath.split('/');
             let currentParentId: string | undefined = refreshSourceId || undefined;
 
             if (pathParts.length > 1) {
                 const folders = pathParts.slice(0, -1);
-                for (const folderName of folders) {
-                    currentParentId = getOrCreateSource(folderName, currentParentId);
+                // If we're refreshing, the first part of webkitRelativePath is the folder we selected.
+                // We skip creating a new source for the selected root itself to prevent "A/A/file.pdf"
+                const startIdx = refreshSourceId ? 1 : 0; 
+                for (let i = startIdx; i < folders.length; i++) {
+                    currentParentId = getOrCreateSource(folders[i], currentParentId);
                 }
             } else if (!refreshSourceId) {
-                currentParentId = getOrCreateSource("Imported Folder", undefined);
+                currentParentId = getOrCreateSource("Root Library", undefined);
             }
 
             const articleId = crypto.randomUUID();
@@ -154,22 +176,36 @@ const LibrarianApp = () => {
                 metadata: createMetadata(file)
             };
             fileMap.current.set(articleId, file);
-            newArticlesList.push(newArt);
-            newEntriesCount++;
+            finalArticles.push(newArt);
+            newAddedCount++;
+        }
+
+        // 3. Remove orphaned articles (only if refreshing)
+        let removedCount = 0;
+        if (refreshSourceId) {
+            const articlesAfterCleanup = finalArticles.filter(a => {
+                // If it wasn't part of the refreshed tree, keep it.
+                if (!refreshedSourceIds.includes(a.sourceId)) return true;
+                // If it was part of refreshed tree but not found in the new file scan, remove it.
+                if (!processedPathsInNewScan.has(a.filePath)) {
+                    fileMap.current.delete(a.id);
+                    removedCount++;
+                    return false;
+                }
+                return true;
+            });
+            setArticles(articlesAfterCleanup);
+        } else {
+            setArticles(finalArticles);
         }
 
         if (newSources.length > 0) setSources(prev => [...prev, ...newSources]);
-        if (newArticlesList.length > 0) setArticles(prev => [...prev, ...newArticlesList]);
         
-        // Trigger UI refresh for link status
         setFileTick(t => t + 1);
-
-        if (reLinkedCount > 0 || newEntriesCount > 0) {
-            alert(`Process Complete!\n- Re-linked to existing IDs: ${reLinkedCount}\n- New PDFs discovered: ${newEntriesCount}`);
-        }
+        alert(`Sync Finished!\n- Matched & Re-linked: ${reLinkedCount}\n- New discovered: ${newAddedCount}\n- Missing/Removed: ${removedCount}`);
     } catch (err) {
         console.error(err);
-        alert("Action failed. Browser folder access might have expired.");
+        alert("Operation failed. Ensure the folder is accessible.");
     } finally {
         setIsLoading(false);
         if (e.target) e.target.value = "";
@@ -177,7 +213,7 @@ const LibrarianApp = () => {
   };
 
   const handleCreateVirtualGroup = () => {
-    const name = window.prompt("Group Name:");
+    const name = window.prompt("New Group Name:");
     if (!name?.trim()) return;
     setSources(prev => [...prev, { id: crypto.randomUUID(), name: name.trim(), isVirtual: true, order: prev.length }]);
   };
@@ -192,7 +228,7 @@ const LibrarianApp = () => {
 
   const handleDeleteSource = (id: string) => {
     const source = sources.find(s => s.id === id);
-    if (!window.confirm(source?.isVirtual ? "Delete group?" : "Delete folder and all PDFs inside?")) return;
+    if (!window.confirm(source?.isVirtual ? "Delete UI Group?" : "Delete folder and all PDFs inside?")) return;
     if (source?.isVirtual) {
         setSources(prev => prev.filter(s => s.id !== id).map(s => s.parentId === id ? { ...s, parentId: undefined } : s));
     } else {
@@ -258,9 +294,9 @@ const LibrarianApp = () => {
                     setSources(data.sources || []); 
                     setArticles(data.articles); 
                     setNotes(data.notes || []); 
-                    fileMap.current.clear(); // Clear old handle pointers
+                    fileMap.current.clear();
                     setFileTick(t => t + 1);
-                    alert("Session metadata imported successfully. Your articles are currently 'Unlinked'. Please Sync your library folder to re-pair the PDF files using their unique paths."); 
+                    alert("Session metadata restored. Your PDFs are currently unlinked. Please click 'Sync' on the root folders to re-establish connections via matching paths."); 
                 }
               } catch (err) { alert("Invalid session file."); }
             };
