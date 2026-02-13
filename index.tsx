@@ -25,6 +25,7 @@ const LibrarianApp = () => {
   const [checkedArticleIds, setCheckedArticleIds] = useState<Set<string>>(new Set<string>());
   
   // This registry links an Article ID to a live browser File object.
+  // It is WIPED when session is imported or page is refreshed.
   const fileMap = useRef<Map<string, File>>(new Map());
   const [, setFileTick] = useState(0);
 
@@ -94,7 +95,6 @@ const LibrarianApp = () => {
         const newSources: Source[] = [];
         const finalArticles: Article[] = [...articles];
         
-        // When refreshing, we need to know which articles belonged to the original root source tree
         const getDescendantSourceIds = (id: string): string[] => {
             const results = [id];
             sources.filter(s => s.parentId === id).forEach(child => {
@@ -104,13 +104,8 @@ const LibrarianApp = () => {
         };
 
         const refreshedSourceIds = refreshSourceId ? getDescendantSourceIds(refreshSourceId) : [];
-        const refreshedPathsInState = new Map<string, Article>();
         if (refreshSourceId) {
-            articles.forEach(a => {
-                if (refreshedSourceIds.includes(a.sourceId)) {
-                    refreshedPathsInState.set(a.filePath, a);
-                }
-            });
+            // Keep track of what we currently have for path-matching
         }
 
         const getOrCreateSource = (folderName: string, parentId: string | undefined): string => {
@@ -130,32 +125,21 @@ const LibrarianApp = () => {
         for (const file of fileList) {
             if (!file.name.toLowerCase().endsWith('.pdf')) continue;
             let relativePath = (file as any).webkitRelativePath || file.name;
-
-            // If we're refreshing a specific folder, let's normalize the path.
-            // If user selects "MyDocs" folder and it contains "Doc1.pdf", 
-            // webkitRelativePath is "MyDocs/Doc1.pdf".
-            // If our state already knows this path, we link it.
-            
             processedPathsInNewScan.add(relativePath);
 
-            // 1. Check if this path exists anywhere in our state
             const existingInState = articles.find(a => a.filePath === relativePath);
 
             if (existingInState) {
-                // Path match! Project existing metadata onto the new physical file
                 fileMap.current.set(existingInState.id, file);
                 reLinkedCount++;
                 continue;
             }
 
-            // 2. Not in state: Add as new
             const pathParts = relativePath.split('/');
             let currentParentId: string | undefined = refreshSourceId || undefined;
 
             if (pathParts.length > 1) {
                 const folders = pathParts.slice(0, -1);
-                // If we're refreshing, the first part of webkitRelativePath is the folder we selected.
-                // We skip creating a new source for the selected root itself to prevent "A/A/file.pdf"
                 const startIdx = refreshSourceId ? 1 : 0; 
                 for (let i = startIdx; i < folders.length; i++) {
                     currentParentId = getOrCreateSource(folders[i], currentParentId);
@@ -180,13 +164,10 @@ const LibrarianApp = () => {
             newAddedCount++;
         }
 
-        // 3. Remove orphaned articles (only if refreshing)
         let removedCount = 0;
         if (refreshSourceId) {
             const articlesAfterCleanup = finalArticles.filter(a => {
-                // If it wasn't part of the refreshed tree, keep it.
                 if (!refreshedSourceIds.includes(a.sourceId)) return true;
-                // If it was part of refreshed tree but not found in the new file scan, remove it.
                 if (!processedPathsInNewScan.has(a.filePath)) {
                     fileMap.current.delete(a.id);
                     removedCount++;
@@ -202,10 +183,10 @@ const LibrarianApp = () => {
         if (newSources.length > 0) setSources(prev => [...prev, ...newSources]);
         
         setFileTick(t => t + 1);
-        alert(`Sync Finished!\n- Matched & Re-linked: ${reLinkedCount}\n- New discovered: ${newAddedCount}\n- Missing/Removed: ${removedCount}`);
+        alert(`Sync Finished!\n- Matched: ${reLinkedCount}\n- New: ${newAddedCount}\n- Removed: ${removedCount}`);
     } catch (err) {
         console.error(err);
-        alert("Operation failed. Ensure the folder is accessible.");
+        alert("Operation failed.");
     } finally {
         setIsLoading(false);
         if (e.target) e.target.value = "";
@@ -296,7 +277,7 @@ const LibrarianApp = () => {
                     setNotes(data.notes || []); 
                     fileMap.current.clear();
                     setFileTick(t => t + 1);
-                    alert("Session metadata restored. Your PDFs are currently unlinked. Please click 'Sync' on the root folders to re-establish connections via matching paths."); 
+                    alert("Session data imported. Please Sync your library folders to re-establish connections to PDF files."); 
                 }
               } catch (err) { alert("Invalid session file."); }
             };
@@ -316,12 +297,26 @@ const LibrarianApp = () => {
 
       <SettingsModal isOpen={isSettingsOpen} onClose={() => setIsSettingsOpen(false)} currentTheme={theme} onThemeChange={setTheme} />
       <NotebookModal isOpen={isNotebookSetupOpen} onClose={() => setIsNotebookSetupOpen(false)} articles={articles} categories={categories} onConfirm={(type, tid) => setActiveEditorNote({ type, targetId: tid, content: '', title: 'New Note' })} />
-      <AddSourceModal isOpen={isAddSourceModalOpen} onClose={() => setIsAddSourceModalOpen(false)} onAddSource={handleAddSource} onAddPDF={() => alert("Please add the root folder containing your PDFs to ensure unique path mapping.")} />
-      <GenerateModal isOpen={isGenerateModalOpen} onClose={() => setIsGenerateModalOpen(false)} onConfirm={() => alert("Export started.")} />
+      <AddSourceModal isOpen={isAddSourceModalOpen} onClose={() => setIsAddSourceModalOpen(false)} onAddSource={handleAddSource} onAddPDF={() => alert("Please add the root folder to maintain paths.")} />
+      <GenerateModal isOpen={isGenerateModalOpen} onClose={() => setIsGenerateModalOpen(false)} onConfirm={(opts) => {
+          // Simplistic export logic for demo purposes
+          const blob = new Blob([JSON.stringify({ notes: opts.notes ? notes : [] }, null, 2)], { type: 'application/json' });
+          const url = URL.createObjectURL(blob);
+          const a = document.createElement('a'); a.href = url; a.download = `export_${Date.now()}.json`; a.click();
+          alert("Export generated.");
+      }} />
       
       {activeEditorNote && <NotebookEditor isOpen={!!activeEditorNote} initialData={activeEditorNote} onClose={() => setActiveEditorNote(null)} onSave={(nd) => {
           const nn = { ...nd, id: nd.id || crypto.randomUUID(), createdAt: nd.createdAt || Date.now() } as Note;
-          setNotes(prev => { const idx = prev.findIndex(x => x.id === nn.id); if (idx !== -1) { const next = [...prev]; next[idx] = nn; return next; } return [...prev, nn]; });
+          setNotes(prev => { 
+            const idx = prev.findIndex(x => x.id === nn.id); 
+            if (idx !== -1) { 
+              const next = [...prev]; 
+              next[idx] = nn; 
+              return next; 
+            } 
+            return [...prev, nn]; 
+          });
       }} isEditing={isEditingNote} />}
 
       <NoteViewerModal note={selectedNote} onClose={() => setSelectedNote(null)} onUpdateTitle={(id, t) => setNotes(prev => prev.map(n => n.id === id ? {...n, title: t} : n))} onDelete={(id) => setNotes(prev => prev.filter(n => n.id !== id))} onEdit={(n) => { setSelectedNote(null); setIsEditingNote(true); setActiveEditorNote(n); }} />
