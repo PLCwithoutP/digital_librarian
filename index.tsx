@@ -57,7 +57,7 @@ const LibrarianApp = () => {
 
   const categories = useMemo(() => {
     const set = new Set<string>();
-    articles.forEach(a => a.metadata?.categories.forEach(c => set.add(c)));
+    articles.forEach(a => a.metadata?.categories?.forEach(c => set.add(c)));
     return Array.from(set).sort();
   }, [articles]);
 
@@ -96,7 +96,7 @@ const LibrarianApp = () => {
         
         const getDescendantSourceIds = (id: string, srcList: Source[]): string[] => {
             const results = [id];
-            srcList.filter(s => s.parentId === id).forEach(child => {
+            (srcList.filter(s => s.parentId === id) as Source[]).forEach(child => {
                 results.push(...getDescendantSourceIds(child.id, srcList));
             });
             return results;
@@ -175,7 +175,7 @@ const LibrarianApp = () => {
   const handleGenerateOutput = (options: any) => {
     const selectedArticles = articles.filter(a => checkedArticleIds.has(a.id));
     
-    // 1. Export BiBTeX file if references selected
+    // 1. Export BiBTeX file
     if (options.references) {
         let bibOutput = "";
         selectedArticles.forEach(a => {
@@ -204,25 +204,26 @@ const LibrarianApp = () => {
         URL.revokeObjectURL(bibUrl);
     }
 
-    // 2. Export Notes if selected
+    // 2. Export Notes file
     if (options.notes) {
         let notesOutput = "";
         const format = options.format || '.md';
+        const isTex = format === '.tex';
         
-        // Sorting sequence buckets: General -> Category -> Article
+        // Sequence: General -> Category -> Article
         const generalNotes = notes.filter(n => n.type === 'general' && options.notesOptions.general);
         const categoryNotes = notes.filter(n => n.type === 'category' && options.notesOptions.category);
         const articleNotes = notes.filter(n => n.type === 'article' && options.notesOptions.article && checkedArticleIds.has(n.targetId || ''));
 
-        if (format === '.tex') {
+        if (isTex) {
             notesOutput += `\\documentclass{article}\n\n\\title{Session Report}\n\\date{\\today}\n\n\\begin{document}\n\n\\maketitle\n\n`;
         } else {
             notesOutput += `# Session Report\n\n`;
         }
 
-        // General Notes
+        // 2.1 General Notes
         if (generalNotes.length > 0) {
-            if (format === '.tex') {
+            if (isTex) {
                 notesOutput += `\\section{General Notes}\n`;
                 generalNotes.forEach(n => {
                     notesOutput += `\\subsection{${n.title}}\n${n.content}\n\n`;
@@ -235,45 +236,66 @@ const LibrarianApp = () => {
             }
         }
 
-        // Category Notes
+        // 2.2 Category Notes
         if (categoryNotes.length > 0) {
-            if (format === '.tex') {
+            if (isTex) {
                 notesOutput += `\\section{Category Notes}\n`;
-                categoryNotes.forEach(n => {
-                    notesOutput += `\\subsection{${n.targetId || 'Unknown Category'}}\n\\textbf{Note: ${n.title}}\\\\\n${n.content}\n\n`;
+                const grouped = categoryNotes.reduce((acc, n) => {
+                    const cat = n.targetId || 'Uncategorized';
+                    if (!acc[cat]) acc[cat] = [];
+                    acc[cat].push(n);
+                    return acc;
+                }, {} as Record<string, Note[]>);
+
+                (Object.entries(grouped) as [string, Note[]][]).forEach(([catName, nList]) => {
+                    notesOutput += `\\subsection{${catName}}\n`;
+                    nList.forEach(n => {
+                        notesOutput += `\\subsubsection{${n.title}}\n${n.content}\n\n`;
+                    });
                 });
             } else {
                 notesOutput += `## Category Notes\n\n`;
-                categoryNotes.forEach(n => {
-                    notesOutput += `### ${n.targetId || 'Unknown Category'}: ${n.title}\n${n.content}\n\n`;
+                const grouped = categoryNotes.reduce((acc, n) => {
+                    const cat = n.targetId || 'Uncategorized';
+                    if (!acc[cat]) acc[cat] = [];
+                    acc[cat].push(n);
+                    return acc;
+                }, {} as Record<string, Note[]>);
+
+                (Object.entries(grouped) as [string, Note[]][]).forEach(([catName, nList]) => {
+                    notesOutput += `### ${catName}\n`;
+                    nList.forEach(n => {
+                        notesOutput += `#### ${n.title}\n${n.content}\n\n`;
+                    });
                 });
             }
         }
 
-        // Article Notes
+        // 2.3 Article Notes
         if (articleNotes.length > 0) {
-            if (format === '.tex') {
+            if (isTex) {
                 notesOutput += `\\section{Article Notes}\n`;
+                // Requirement: \subsection{note title}. First sentence: "This is \textit{article title}."
                 articleNotes.forEach(n => {
                     const art = articles.find(a => a.id === n.targetId);
                     const artName = art?.metadata?.title || art?.fileName || 'Unknown Article';
-                    notesOutput += `\\subsection{${artName}}\n\\textbf{Note: ${n.title}}\\\\\n${n.content}\n\n`;
+                    notesOutput += `\\subsection{${n.title}}\nThis is \\textit{${artName}}.\n\n${n.content}\n\n`;
                 });
             } else {
                 notesOutput += `## Article Notes\n\n`;
                 articleNotes.forEach(n => {
                     const art = articles.find(a => a.id === n.targetId);
                     const artName = art?.metadata?.title || art?.fileName || 'Unknown Article';
-                    notesOutput += `### ${artName}: ${n.title}\n${n.content}\n\n`;
+                    notesOutput += `### ${n.title}\nThis is **${artName}**.\n\n${n.content}\n\n`;
                 });
             }
         }
 
-        if (format === '.tex') {
+        if (isTex) {
             notesOutput += `\n\\end{document}`;
         }
 
-        const notesBlob = new Blob([notesOutput], { type: format === '.tex' ? 'text/x-tex' : 'text/markdown' });
+        const notesBlob = new Blob([notesOutput], { type: isTex ? 'text/x-tex' : 'text/markdown' });
         const notesUrl = URL.createObjectURL(notesBlob);
         const notesLink = document.createElement('a');
         notesLink.href = notesUrl;
@@ -304,7 +326,12 @@ const LibrarianApp = () => {
         setSources(prev => prev.filter(s => s.id !== id).map(s => s.parentId === id ? { ...s, parentId: undefined } : s));
     } else {
         const toDelete = new Set<string>([id]);
-        const findChildren = (pid: string) => sources.filter(s => s.parentId === pid).forEach(c => { toDelete.add(c.id); findChildren(c.id); });
+        const findChildren = (pid: string): void => {
+            (sources.filter(s => s.parentId === pid) as Source[]).forEach(c => {
+                toDelete.add(c.id);
+                findChildren(c.id);
+            });
+        };
         findChildren(id);
         setArticles(prev => prev.filter(a => !toDelete.has(a.sourceId)));
         setSources(prev => prev.filter(s => !toDelete.has(s.id)));
@@ -315,7 +342,12 @@ const LibrarianApp = () => {
     let list = articles;
     if (activeSourceId) {
         const branch = new Set<string>([activeSourceId]);
-        const findSub = (pid: string) => sources.filter(s => s.parentId === pid).forEach(c => { branch.add(c.id); findSub(c.id); });
+        const findSub = (pid: string): void => {
+            (sources.filter(s => s.parentId === pid) as Source[]).forEach(c => {
+                branch.add(c.id);
+                findSub(c.id);
+            });
+        };
         findSub(activeSourceId);
         list = list.filter(a => branch.has(a.sourceId));
     }
@@ -430,6 +462,8 @@ const LibrarianApp = () => {
 };
 
 const App = () => (
-  <Suspense fallback={<div className="h-screen w-screen flex items-center justify-center bg-slate-50">Librarian Initializing...</div>}><LibrarianApp /></Suspense>
+  <Suspense fallback={<div className="h-screen w-screen flex items-center justify-center bg-slate-50">Librarian Initializing...</div>}>
+    <LibrarianApp />
+  </Suspense>
 );
 createRoot(document.getElementById('root')!).render(<App />);
