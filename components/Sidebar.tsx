@@ -40,7 +40,8 @@ const SourceTreeItem: React.FC<{
   const hasChildren = children.length > 0;
   const count = articles.filter(a => a.sourceId === source.id).length;
 
-  const availableFolders = allSources.filter(s => !s.isVirtual && s.parentId !== source.id);
+  // Sync button only for root folders (depth 0 and not virtual)
+  const isRefreshable = depth === 0 && !source.isVirtual;
 
   return (
     <div className="transition-all">
@@ -50,11 +51,7 @@ const SourceTreeItem: React.FC<{
              <svg className={`w-3 h-3 transition-transform ${isExpanded ? 'rotate-90' : ''}`} fill="none" stroke="currentColor" viewBox="0 0 24 24"><path d="M9 5l7 7-7 7" strokeWidth={2} /></svg>
           </div>
           <svg className={`w-4 h-4 shrink-0 ${source.isVirtual ? 'text-indigo-400' : 'text-slate-500'}`} fill="none" stroke="currentColor" viewBox="0 0 24 24">
-            {source.isVirtual ? (
-              <path d="M19 11H5m14 0a2 2 0 012 2v6a2 2 0 01-2 2H5a2 2 0 01-2-2v-6a2 2 0 012-2m14 0V9a2 2 0 00-2-2M5 11V9a2 2 0 012-2m0 0V5a2 2 0 012-2h6a2 2 0 012 2v2M7 7h10" strokeWidth={2} />
-            ) : (
-              <path d="M3 7v10a2 2 0 002 2h14a2 2 0 002-2V9a2 2 0 00-2-2h-6l-2-2H5a2 2 0 00-2 2z" strokeWidth={2} />
-            )}
+            <path d="M3 7v10a2 2 0 002 2h14a2 2 0 002-2V9a2 2 0 00-2-2h-6l-2-2H5a2 2 0 00-2 2z" strokeWidth={2} />
           </svg>
           <span className={`truncate text-sm ml-1 ${source.isVirtual ? 'font-bold' : ''}`}>{source.name}</span>
           <span className="text-[10px] bg-slate-700 px-1.5 py-0.5 rounded-full ml-auto mr-1">{count}</span>
@@ -63,29 +60,19 @@ const SourceTreeItem: React.FC<{
         <div className="flex items-center opacity-0 group-hover:opacity-100 transition-opacity pr-1">
           {source.isVirtual && (
             <div className="relative">
-              <button onClick={(e) => { e.stopPropagation(); setShowFolderPicker(!showFolderPicker); }} className="p-1.5 text-indigo-400 hover:text-indigo-300" title="Add Folder to Group">
+              <button onClick={(e) => { e.stopPropagation(); setShowFolderPicker(!showFolderPicker); }} className="p-1.5 text-indigo-400 hover:text-indigo-300">
                 <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path d="M12 4v16m8-8H4" strokeWidth={2} /></svg>
               </button>
-              {showFolderPicker && (
-                <div className="absolute top-full right-0 mt-1 w-48 bg-slate-800 border border-slate-700 rounded-lg shadow-xl z-50 max-h-60 overflow-y-auto">
-                    <div className="p-2 text-[10px] uppercase font-bold text-slate-500 border-b border-slate-700">Add Folder</div>
-                    {availableFolders.map(af => (
-                        <button key={af.id} onClick={(e) => { e.stopPropagation(); onAssignFolder(af.id, source.id); setShowFolderPicker(false); }} className="w-full text-left px-3 py-1.5 text-xs hover:bg-slate-700 text-slate-300 truncate">
-                            {af.name}
-                        </button>
-                    ))}
-                </div>
-              )}
             </div>
           )}
-          {!source.isVirtual && (
-            <label className="p-1.5 text-slate-400 hover:text-emerald-400 cursor-pointer" title="Sync / Refresh">
+          {isRefreshable && (
+            <label className="p-1.5 text-slate-400 hover:text-emerald-400 cursor-pointer" title="Sync Master Folder">
               <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" strokeWidth={2} /></svg>
               <input type="file" className="hidden" multiple webkitdirectory="" directory="" onChange={(e) => onRefresh(e, source.id)} />
             </label>
           )}
           <button onClick={(e) => { e.stopPropagation(); onDelete(source.id); }} className="p-1.5 text-slate-400 hover:text-red-400">
-             <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" strokeWidth={2} /></svg>
+             <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7" strokeWidth={2} /></svg>
           </button>
         </div>
       </div>
@@ -132,7 +119,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
         </div>
 
         <div className="mb-6">
-            <div className="px-6 mb-2 text-[10px] font-bold uppercase text-slate-500 tracking-wider">Folders</div>
+            <div className="px-6 mb-2 text-[10px] font-bold uppercase text-slate-500 tracking-wider">Library Roots</div>
             {libraryFolders.map(s => (
                 <SourceTreeItem key={s.id} source={s} allSources={sources} articles={articles} activeSourceId={activeSourceId} depth={0} onSelect={onSetActiveSource} onDelete={onDeleteSource} onRefresh={onRefreshSource} onAssignFolder={onMoveSource} />
             ))}
@@ -140,13 +127,15 @@ export const Sidebar: React.FC<SidebarProps> = ({
         
         {notes.length > 0 && (
           <div className="mb-6 border-t border-slate-800 pt-4">
-            <div className="px-6 mb-2 text-[10px] font-bold uppercase text-slate-500 tracking-wider">Notes</div>
-            {notes.map(n => (
-              <button key={n.id} onClick={() => onOpenNote(n)} className="w-full text-left px-6 py-1.5 text-xs hover:bg-slate-800 text-slate-400 truncate flex items-center gap-2">
-                <span className={`w-1.5 h-1.5 rounded-full ${n.type === 'category' ? 'bg-purple-500' : n.type === 'article' ? 'bg-amber-500' : 'bg-slate-500'}`}></span>
-                {n.title}
-              </button>
-            ))}
+            <div className="px-6 mb-2 text-[10px] font-bold uppercase text-slate-500 tracking-wider">Recent Notes</div>
+            <div className="space-y-1">
+              {notes.slice(-8).reverse().map(n => (
+                <button key={n.id} onClick={() => onOpenNote(n)} className="w-full text-left px-6 py-1.5 text-xs hover:bg-slate-800 text-slate-400 truncate flex items-center gap-2">
+                  <span className={`w-1.5 h-1.5 rounded-full ${n.type === 'category' ? 'bg-purple-500' : n.type === 'article' ? 'bg-amber-500' : 'bg-slate-500'}`}></span>
+                  {n.title}
+                </button>
+              ))}
+            </div>
           </div>
         )}
 
@@ -163,10 +152,10 @@ export const Sidebar: React.FC<SidebarProps> = ({
       </nav>
 
       <div className="p-4 border-t border-slate-800 space-y-2">
-        <button onClick={onOpenGenerateModal} disabled={isGenerateDisabled} className={`w-full font-bold py-2.5 rounded-lg shadow-lg transition-all flex items-center justify-center gap-2 ${isGenerateDisabled ? 'bg-slate-800 text-slate-500 cursor-not-allowed opacity-50' : 'bg-indigo-600 hover:bg-indigo-700 text-white active:scale-95'}`}>
+        <button onClick={onOpenGenerateModal} disabled={isGenerateDisabled} className={`w-full font-bold py-2.5 rounded-lg transition-all flex items-center justify-center gap-2 ${isGenerateDisabled ? 'bg-slate-800 text-slate-500 cursor-not-allowed opacity-50' : 'bg-indigo-600 hover:bg-indigo-700 text-white'}`}>
           Generate Output
         </button>
-        <button onClick={onOpenAddModal} className="w-full bg-slate-800 hover:bg-slate-700 text-slate-300 font-medium py-2 rounded-lg transition-colors border border-slate-700">Add Content</button>
+        <button onClick={onOpenAddModal} className="w-full bg-slate-800 hover:bg-slate-700 text-slate-300 font-medium py-2 rounded-lg transition-colors border border-slate-700">Add Library</button>
         <button onClick={onOpenSettings} className="w-full bg-slate-800 hover:bg-slate-700 text-slate-300 font-medium py-2 rounded-lg transition-colors border border-slate-700">Settings</button>
       </div>
     </aside>

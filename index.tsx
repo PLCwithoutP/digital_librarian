@@ -81,18 +81,16 @@ const LibrarianApp = () => {
     const files = e.target.files;
     if (!files || files.length === 0) return;
 
-    if (refreshSourceId && !window.confirm("Refresh this folder? Metadata for existing paths will be preserved. New files will be added. Missing files will be removed.")) {
+    if (refreshSourceId && !window.confirm("Sync this folder? Metadata will be protected based on file paths. New files added, missing removed.")) {
       return;
     }
 
     setIsLoading(true);
-    setLoadingMessage(refreshSourceId ? 'Syncing paths...' : 'Mapping folder...');
+    setLoadingMessage('Syncing Library...');
     
     try {
         const fileList: File[] = Array.from(files);
         const newSources: Source[] = [];
-        // We start with a copy of all articles. 
-        // For refresh logic, we will modify this list based on the sync outcome.
         let workingArticles = [...articles];
         
         const getDescendantSourceIds = (id: string): string[] => {
@@ -123,29 +121,26 @@ const LibrarianApp = () => {
             let relativePath = (file as any).webkitRelativePath || file.name;
             processedPathsInNewScan.add(relativePath);
 
-            // Match by exact filePath
+            // Use the original master articles list for matching to ensure protection on first refresh
             const existingInState = articles.find(a => a.filePath === relativePath);
 
             if (existingInState) {
-                // IMPORTANT: We preserve the existing object (metadata, ID, etc)
                 fileMap.current.set(existingInState.id, file);
                 reLinkedCount++;
                 continue;
             }
 
-            // Path is brand new
             const pathParts = relativePath.split('/');
             let currentParentId: string | undefined = refreshSourceId || undefined;
 
             if (pathParts.length > 1) {
                 const folders = pathParts.slice(0, -1);
-                // When refreshing, the first part of webkitRelativePath is the folder we selected.
                 const startIdx = refreshSourceId ? 1 : 0; 
                 for (let i = startIdx; i < folders.length; i++) {
                     currentParentId = getOrCreateSource(folders[i], currentParentId);
                 }
             } else if (!refreshSourceId) {
-                currentParentId = getOrCreateSource("Root Library", undefined);
+                currentParentId = getOrCreateSource("Master Library", undefined);
             }
 
             const articleId = crypto.randomUUID();
@@ -164,7 +159,6 @@ const LibrarianApp = () => {
             newAddedCount++;
         }
 
-        // Cleanup: remove articles that were in the refreshed folder branch but NOT in the new scan
         let removedCount = 0;
         if (refreshSourceId) {
             workingArticles = workingArticles.filter(a => {
@@ -180,12 +174,11 @@ const LibrarianApp = () => {
 
         setArticles(workingArticles);
         if (newSources.length > 0) setSources(prev => [...prev, ...newSources]);
-        
         setFileTick(t => t + 1);
-        alert(`Sync Finished!\n- Matched & Protected: ${reLinkedCount}\n- New discovered: ${newAddedCount}\n- Missing/Removed: ${removedCount}`);
+        alert(`Sync Complete\nProtected: ${reLinkedCount}\nNew: ${newAddedCount}\nRemoved: ${removedCount}`);
     } catch (err) {
         console.error(err);
-        alert("Operation failed. Ensure the folder is accessible.");
+        alert("Sync Failed.");
     } finally {
         setIsLoading(false);
         if (e.target) e.target.value = "";
@@ -199,8 +192,6 @@ const LibrarianApp = () => {
 
     if (options.references) {
       if (format === '.md') output += "# References\n\n";
-      else output += "% BiBTeX References\n\n";
-
       selectedArticles.forEach(a => {
         const m = a.metadata;
         if (m) {
@@ -211,8 +202,8 @@ const LibrarianApp = () => {
     }
 
     if (options.notes) {
-      if (format === '.md') output += "\n# Notes\n\n";
-      else output += "\n\\section{Notes}\n\n";
+      if (format === '.md') output += "\n# Collected Notes\n\n";
+      else output += "\n\\section{Collected Notes}\n\n";
 
       const filteredNotes = notes.filter(n => {
         if (n.type === 'general' && options.notesOptions.general) return true;
@@ -256,7 +247,7 @@ const LibrarianApp = () => {
 
   const handleDeleteSource = (id: string) => {
     const source = sources.find(s => s.id === id);
-    if (!window.confirm(source?.isVirtual ? "Delete UI Group?" : "Delete folder and all PDFs inside?")) return;
+    if (!window.confirm("Delete selected source?")) return;
     if (source?.isVirtual) {
         setSources(prev => prev.filter(s => s.id !== id).map(s => s.parentId === id ? { ...s, parentId: undefined } : s));
     } else {
@@ -281,15 +272,14 @@ const LibrarianApp = () => {
       const q = searchQuery.toLowerCase();
       list = list.filter(a => (
         a.fileName.toLowerCase().includes(q) || a.metadata?.title.toLowerCase().includes(q) ||
-        a.metadata?.authors.some(auth => auth.toLowerCase().includes(q)) ||
-        a.metadata?.keywords.some(k => k.toLowerCase().includes(q))
+        a.metadata?.authors.some(auth => auth.toLowerCase().includes(q))
       ));
     }
     return [...list];
   }, [articles, activeSourceId, activeCategoryId, searchQuery, sources]);
 
   return (
-    <div className="flex h-screen w-screen bg-slate-50 dark:bg-slate-950 font-sans text-slate-900 dark:text-slate-100 overflow-hidden transition-colors duration-200">
+    <div className="flex h-screen w-screen bg-slate-50 dark:bg-slate-950 font-sans text-slate-900 dark:text-slate-100 overflow-hidden">
       <Sidebar 
         sources={sources} articles={articles} notes={notes} categories={categories} activeSourceId={activeSourceId} activeCategoryId={activeCategoryId}
         onSetActiveSource={setActiveSourceId} onSetActiveCategory={setActiveCategoryId} onOpenAddModal={() => setIsAddSourceModalOpen(true)}
@@ -323,10 +313,9 @@ const LibrarianApp = () => {
                     setArticles(data.articles); 
                     setNotes(data.notes || []); 
                     fileMap.current.clear();
-                    setFileTick(t => t + 1);
-                    alert("Session data restored. Please Sync your library folders to re-establish connections to PDF files."); 
+                    alert("Imported. Click 'Sync' on root folders to link PDFs."); 
                 }
-              } catch (err) { alert("Invalid session file."); }
+              } catch (err) { alert("Invalid file."); }
             };
             input.click();
         }}
@@ -343,25 +332,39 @@ const LibrarianApp = () => {
       />
 
       <SettingsModal isOpen={isSettingsOpen} onClose={() => setIsSettingsOpen(false)} currentTheme={theme} onThemeChange={setTheme} />
-      <NotebookModal isOpen={isNotebookSetupOpen} onClose={() => setIsNotebookSetupOpen(false)} articles={articles} categories={categories} onConfirm={(type, tid) => setActiveEditorNote({ type, targetId: tid, content: '', title: 'New Note' })} />
-      <AddSourceModal isOpen={isAddSourceModalOpen} onClose={() => setIsAddSourceModalOpen(false)} onAddSource={handleAddSource} onAddPDF={() => alert("Please add the root folder to maintain paths.")} />
+      
+      <NotebookModal isOpen={isNotebookSetupOpen} onClose={() => setIsNotebookSetupOpen(false)} articles={articles} categories={categories} 
+        onConfirm={(type, tid) => {
+          const title = type === 'general' ? 'General Note' : type === 'category' ? `Note on ${tid}` : 'Article Note';
+          setActiveEditorNote({ type, targetId: tid, content: '', title });
+        }} 
+      />
+
+      <AddSourceModal isOpen={isAddSourceModalOpen} onClose={() => setIsAddSourceModalOpen(false)} onAddSource={handleAddSource} onAddPDF={() => alert("Root folder import recommended.")} />
       <GenerateModal isOpen={isGenerateModalOpen} onClose={() => setIsGenerateModalOpen(false)} onConfirm={handleGenerateOutput} />
       
-      {activeEditorNote && <NotebookEditor isOpen={!!activeEditorNote} initialData={activeEditorNote} onClose={() => setActiveEditorNote(null)} onSave={(nd) => {
+      {activeEditorNote && (
+        <NotebookEditor isOpen={!!activeEditorNote} initialData={activeEditorNote} onClose={() => setActiveEditorNote(null)} onSave={(nd) => {
           const nn = { ...nd, id: nd.id || crypto.randomUUID(), createdAt: nd.createdAt || Date.now() } as Note;
           setNotes(prev => { 
             const idx = prev.findIndex(x => x.id === nn.id); 
-            if (idx !== -1) { 
-              const next = [...prev]; 
-              next[idx] = nn; 
-              return next; 
-            } 
+            if (idx !== -1) { const nxt = [...prev]; nxt[idx] = nn; return nxt; } 
             return [...prev, nn]; 
           });
-      }} isEditing={isEditingNote} />}
+        }} isEditing={isEditingNote} />
+      )}
 
       <NoteViewerModal note={selectedNote} onClose={() => setSelectedNote(null)} onUpdateTitle={(id, t) => setNotes(prev => prev.map(n => n.id === id ? {...n, title: t} : n))} onDelete={(id) => setNotes(prev => prev.filter(n => n.id !== id))} onEdit={(n) => { setSelectedNote(null); setIsEditingNote(true); setActiveEditorNote(n); }} />
       
+      {/* Floating Note Button */}
+      <button 
+        onClick={() => setIsNotebookSetupOpen(true)}
+        className="fixed bottom-6 right-6 w-14 h-14 bg-indigo-600 hover:bg-indigo-700 text-white rounded-full shadow-2xl flex items-center justify-center transition-all active:scale-95 z-[40]"
+        title="Add Note"
+      >
+        <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeWidth={2.5} d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z" /></svg>
+      </button>
+
       {isLoading && (
           <div className="fixed inset-0 z-[100] bg-black/60 flex items-center justify-center backdrop-blur-sm">
               <div className="bg-white dark:bg-slate-900 p-10 rounded-2xl shadow-2xl flex flex-col items-center border border-slate-200 dark:border-slate-800">
@@ -375,6 +378,6 @@ const LibrarianApp = () => {
 };
 
 const App = () => (
-  <Suspense fallback={<div className="h-screen w-screen flex items-center justify-center bg-slate-50">Initializing...</div>}><LibrarianApp /></Suspense>
+  <Suspense fallback={<div className="h-screen w-screen flex items-center justify-center bg-slate-50">Loading...</div>}><LibrarianApp /></Suspense>
 );
 createRoot(document.getElementById('root')!).render(<App />);
