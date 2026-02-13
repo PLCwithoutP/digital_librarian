@@ -24,8 +24,6 @@ const LibrarianApp = () => {
   const [sortConfig, setSortConfig] = useState<{ key: string; direction: 'asc' | 'desc' } | null>(null);
   const [checkedArticleIds, setCheckedArticleIds] = useState<Set<string>>(new Set<string>());
   
-  // This registry links an Article ID to a live browser File object.
-  // It is WIPED when session is imported or page is refreshed.
   const fileMap = useRef<Map<string, File>>(new Map());
   const [, setFileTick] = useState(0);
 
@@ -93,7 +91,9 @@ const LibrarianApp = () => {
     try {
         const fileList: File[] = Array.from(files);
         const newSources: Source[] = [];
-        const finalArticles: Article[] = [...articles];
+        // We start with a copy of all articles. 
+        // For refresh logic, we will modify this list based on the sync outcome.
+        let workingArticles = [...articles];
         
         const getDescendantSourceIds = (id: string): string[] => {
             const results = [id];
@@ -103,10 +103,10 @@ const LibrarianApp = () => {
             return results;
         };
 
-        const refreshedSourceIds = refreshSourceId ? getDescendantSourceIds(refreshSourceId) : [];
-        if (refreshSourceId) {
-            // Keep track of what we currently have for path-matching
-        }
+        const refreshedSourceBranchIds = refreshSourceId ? getDescendantSourceIds(refreshSourceId) : [];
+        const processedPathsInNewScan = new Set<string>();
+        let reLinkedCount = 0;
+        let newAddedCount = 0;
 
         const getOrCreateSource = (folderName: string, parentId: string | undefined): string => {
             let existing = sources.find(s => s.name === folderName && s.parentId === parentId);
@@ -118,28 +118,28 @@ const LibrarianApp = () => {
             return id;
         };
 
-        const processedPathsInNewScan = new Set<string>();
-        let reLinkedCount = 0;
-        let newAddedCount = 0;
-
         for (const file of fileList) {
             if (!file.name.toLowerCase().endsWith('.pdf')) continue;
             let relativePath = (file as any).webkitRelativePath || file.name;
             processedPathsInNewScan.add(relativePath);
 
+            // Match by exact filePath
             const existingInState = articles.find(a => a.filePath === relativePath);
 
             if (existingInState) {
+                // IMPORTANT: We preserve the existing object (metadata, ID, etc)
                 fileMap.current.set(existingInState.id, file);
                 reLinkedCount++;
                 continue;
             }
 
+            // Path is brand new
             const pathParts = relativePath.split('/');
             let currentParentId: string | undefined = refreshSourceId || undefined;
 
             if (pathParts.length > 1) {
                 const folders = pathParts.slice(0, -1);
+                // When refreshing, the first part of webkitRelativePath is the folder we selected.
                 const startIdx = refreshSourceId ? 1 : 0; 
                 for (let i = startIdx; i < folders.length; i++) {
                     currentParentId = getOrCreateSource(folders[i], currentParentId);
@@ -160,37 +160,84 @@ const LibrarianApp = () => {
                 metadata: createMetadata(file)
             };
             fileMap.current.set(articleId, file);
-            finalArticles.push(newArt);
+            workingArticles.push(newArt);
             newAddedCount++;
         }
 
+        // Cleanup: remove articles that were in the refreshed folder branch but NOT in the new scan
         let removedCount = 0;
         if (refreshSourceId) {
-            const articlesAfterCleanup = finalArticles.filter(a => {
-                if (!refreshedSourceIds.includes(a.sourceId)) return true;
-                if (!processedPathsInNewScan.has(a.filePath)) {
+            workingArticles = workingArticles.filter(a => {
+                const isInRefreshedBranch = refreshedSourceBranchIds.includes(a.sourceId);
+                if (isInRefreshedBranch && !processedPathsInNewScan.has(a.filePath)) {
                     fileMap.current.delete(a.id);
                     removedCount++;
                     return false;
                 }
                 return true;
             });
-            setArticles(articlesAfterCleanup);
-        } else {
-            setArticles(finalArticles);
         }
 
+        setArticles(workingArticles);
         if (newSources.length > 0) setSources(prev => [...prev, ...newSources]);
         
         setFileTick(t => t + 1);
-        alert(`Sync Finished!\n- Matched: ${reLinkedCount}\n- New: ${newAddedCount}\n- Removed: ${removedCount}`);
+        alert(`Sync Finished!\n- Matched & Protected: ${reLinkedCount}\n- New discovered: ${newAddedCount}\n- Missing/Removed: ${removedCount}`);
     } catch (err) {
         console.error(err);
-        alert("Operation failed.");
+        alert("Operation failed. Ensure the folder is accessible.");
     } finally {
         setIsLoading(false);
         if (e.target) e.target.value = "";
     }
+  };
+
+  const handleGenerateOutput = (options: any) => {
+    const selectedArticles = articles.filter(a => checkedArticleIds.has(a.id));
+    let output = "";
+    const format = options.format || '.md';
+
+    if (options.references) {
+      if (format === '.md') output += "# References\n\n";
+      else output += "% BiBTeX References\n\n";
+
+      selectedArticles.forEach(a => {
+        const m = a.metadata;
+        if (m) {
+          const key = (m.authors[0]?.split(' ').pop() || 'Unknown') + m.year;
+          output += `@article{${key.toLowerCase()},\n  title = {${m.title}},\n  author = {${m.authors.join(' and ')}},\n  journal = {${m.journal || ''}},\n  year = {${m.year}},\n  volume = {${m.volume || ''}},\n  number = {${m.number || ''}},\n  doi = {${m.doi || ''}},\n  url = {${m.url || ''}}\n}\n\n`;
+        }
+      });
+    }
+
+    if (options.notes) {
+      if (format === '.md') output += "\n# Notes\n\n";
+      else output += "\n\\section{Notes}\n\n";
+
+      const filteredNotes = notes.filter(n => {
+        if (n.type === 'general' && options.notesOptions.general) return true;
+        if (n.type === 'category' && options.notesOptions.category) return true;
+        if (n.type === 'article' && options.notesOptions.article) {
+          return checkedArticleIds.has(n.targetId || '');
+        }
+        return false;
+      });
+
+      filteredNotes.forEach(n => {
+        if (format === '.md') {
+          output += `## ${n.title} (${n.type})\n${n.content}\n\n`;
+        } else {
+          output += `\\subsection{${n.title} (${n.type})}\n${n.content}\n\n`;
+        }
+      });
+    }
+
+    const blob = new Blob([output], { type: 'text/plain' });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement('a');
+    link.href = url;
+    link.download = `librarian_export_${Date.now()}${format}`;
+    link.click();
   };
 
   const handleCreateVirtualGroup = () => {
@@ -247,7 +294,7 @@ const LibrarianApp = () => {
         sources={sources} articles={articles} notes={notes} categories={categories} activeSourceId={activeSourceId} activeCategoryId={activeCategoryId}
         onSetActiveSource={setActiveSourceId} onSetActiveCategory={setActiveCategoryId} onOpenAddModal={() => setIsAddSourceModalOpen(true)}
         onOpenGenerateModal={() => setIsGenerateModalOpen(true)} onOpenSettings={() => setIsSettingsOpen(true)} onOpenNote={setSelectedNote}
-        onDeleteSource={handleDeleteSource} isGenerateDisabled={articles.length === 0} onRefreshSource={handleAddSource}
+        onDeleteSource={handleDeleteSource} isGenerateDisabled={checkedArticleIds.size === 0} onRefreshSource={handleAddSource}
         onCreateGroup={handleCreateVirtualGroup} onMoveSource={handleAssignFolderToGroup}
       />
 
@@ -277,7 +324,7 @@ const LibrarianApp = () => {
                     setNotes(data.notes || []); 
                     fileMap.current.clear();
                     setFileTick(t => t + 1);
-                    alert("Session data imported. Please Sync your library folders to re-establish connections to PDF files."); 
+                    alert("Session data restored. Please Sync your library folders to re-establish connections to PDF files."); 
                 }
               } catch (err) { alert("Invalid session file."); }
             };
@@ -298,13 +345,7 @@ const LibrarianApp = () => {
       <SettingsModal isOpen={isSettingsOpen} onClose={() => setIsSettingsOpen(false)} currentTheme={theme} onThemeChange={setTheme} />
       <NotebookModal isOpen={isNotebookSetupOpen} onClose={() => setIsNotebookSetupOpen(false)} articles={articles} categories={categories} onConfirm={(type, tid) => setActiveEditorNote({ type, targetId: tid, content: '', title: 'New Note' })} />
       <AddSourceModal isOpen={isAddSourceModalOpen} onClose={() => setIsAddSourceModalOpen(false)} onAddSource={handleAddSource} onAddPDF={() => alert("Please add the root folder to maintain paths.")} />
-      <GenerateModal isOpen={isGenerateModalOpen} onClose={() => setIsGenerateModalOpen(false)} onConfirm={(opts) => {
-          // Simplistic export logic for demo purposes
-          const blob = new Blob([JSON.stringify({ notes: opts.notes ? notes : [] }, null, 2)], { type: 'application/json' });
-          const url = URL.createObjectURL(blob);
-          const a = document.createElement('a'); a.href = url; a.download = `export_${Date.now()}.json`; a.click();
-          alert("Export generated.");
-      }} />
+      <GenerateModal isOpen={isGenerateModalOpen} onClose={() => setIsGenerateModalOpen(false)} onConfirm={handleGenerateOutput} />
       
       {activeEditorNote && <NotebookEditor isOpen={!!activeEditorNote} initialData={activeEditorNote} onClose={() => setActiveEditorNote(null)} onSave={(nd) => {
           const nn = { ...nd, id: nd.id || crypto.randomUUID(), createdAt: nd.createdAt || Date.now() } as Note;

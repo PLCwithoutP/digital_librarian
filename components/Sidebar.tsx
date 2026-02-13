@@ -40,7 +40,6 @@ const SourceTreeItem: React.FC<{
   const hasChildren = children.length > 0;
   const count = articles.filter(a => a.sourceId === source.id).length;
 
-  // List folders not already in a group or root folders
   const availableFolders = allSources.filter(s => !s.isVirtual && s.parentId !== source.id);
 
   return (
@@ -75,7 +74,6 @@ const SourceTreeItem: React.FC<{
                             {af.name}
                         </button>
                     ))}
-                    {availableFolders.length === 0 && <div className="p-3 text-[10px] italic text-slate-500">No folders available.</div>}
                 </div>
               )}
             </div>
@@ -119,33 +117,39 @@ export const Sidebar: React.FC<SidebarProps> = ({
       
       <nav className="flex-1 overflow-y-auto py-4">
         <button onClick={() => { onSetActiveSource(null); onSetActiveCategory(null); }} className={`w-full text-left px-6 py-3 flex justify-between hover:bg-slate-800 mb-4 transition-colors ${!activeSourceId && !activeCategoryId ? 'bg-slate-800 text-white' : ''}`}>
-           <span className="text-sm font-semibold">Library</span>
+           <span className="text-sm font-semibold">All Library</span>
            <span className="text-xs bg-slate-700 px-2 py-0.5 rounded-full">{articles.length}</span>
         </button>
 
         <div className="mb-6">
             <div className="flex items-center justify-between px-6 mb-2">
-                <span className="text-[10px] font-bold uppercase text-slate-500 tracking-wider">UI Groups</span>
+                <span className="text-[10px] font-bold uppercase text-slate-500 tracking-wider">Groups</span>
                 <button onClick={onCreateGroup} className="text-[10px] bg-slate-800 hover:bg-slate-700 px-2 py-0.5 rounded text-indigo-300 border border-slate-700">+ Group</button>
             </div>
-            {groups.length === 0 ? (
-                <div className="px-6 py-2 text-[10px] italic text-slate-600">Create groups to organize folders.</div>
-            ) : (
-                groups.map(g => (
-                    <SourceTreeItem key={g.id} source={g} allSources={sources} articles={articles} activeSourceId={activeSourceId} depth={0} onSelect={onSetActiveSource} onDelete={onDeleteSource} onRefresh={onRefreshSource} onAssignFolder={onMoveSource} />
-                ))
-            )}
+            {groups.map(g => (
+                <SourceTreeItem key={g.id} source={g} allSources={sources} articles={articles} activeSourceId={activeSourceId} depth={0} onSelect={onSetActiveSource} onDelete={onDeleteSource} onRefresh={onRefreshSource} onAssignFolder={onMoveSource} />
+            ))}
         </div>
 
         <div className="mb-6">
-            <div className="px-6 mb-2">
-                <span className="text-[10px] font-bold uppercase text-slate-500 tracking-wider">Folders</span>
-            </div>
+            <div className="px-6 mb-2 text-[10px] font-bold uppercase text-slate-500 tracking-wider">Folders</div>
             {libraryFolders.map(s => (
                 <SourceTreeItem key={s.id} source={s} allSources={sources} articles={articles} activeSourceId={activeSourceId} depth={0} onSelect={onSetActiveSource} onDelete={onDeleteSource} onRefresh={onRefreshSource} onAssignFolder={onMoveSource} />
             ))}
         </div>
         
+        {notes.length > 0 && (
+          <div className="mb-6 border-t border-slate-800 pt-4">
+            <div className="px-6 mb-2 text-[10px] font-bold uppercase text-slate-500 tracking-wider">Notes</div>
+            {notes.map(n => (
+              <button key={n.id} onClick={() => onOpenNote(n)} className="w-full text-left px-6 py-1.5 text-xs hover:bg-slate-800 text-slate-400 truncate flex items-center gap-2">
+                <span className={`w-1.5 h-1.5 rounded-full ${n.type === 'category' ? 'bg-purple-500' : n.type === 'article' ? 'bg-amber-500' : 'bg-slate-500'}`}></span>
+                {n.title}
+              </button>
+            ))}
+          </div>
+        )}
+
         {categories.length > 0 && (
           <div className="mt-8 border-t border-slate-800 pt-4">
             <div className="px-6 mb-2 text-[10px] font-bold uppercase text-slate-500 tracking-wider">Labels</div>
@@ -159,10 +163,10 @@ export const Sidebar: React.FC<SidebarProps> = ({
       </nav>
 
       <div className="p-4 border-t border-slate-800 space-y-2">
-        <button onClick={onOpenAddModal} className="w-full bg-indigo-600 hover:bg-indigo-700 text-white font-bold py-2.5 rounded-lg shadow-lg transition-all active:scale-95 flex items-center justify-center gap-2">
-          <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path d="M12 4v16m8-8H4" strokeWidth={2} /></svg>
-          Add Folder
+        <button onClick={onOpenGenerateModal} disabled={isGenerateDisabled} className={`w-full font-bold py-2.5 rounded-lg shadow-lg transition-all flex items-center justify-center gap-2 ${isGenerateDisabled ? 'bg-slate-800 text-slate-500 cursor-not-allowed opacity-50' : 'bg-indigo-600 hover:bg-indigo-700 text-white active:scale-95'}`}>
+          Generate Output
         </button>
+        <button onClick={onOpenAddModal} className="w-full bg-slate-800 hover:bg-slate-700 text-slate-300 font-medium py-2 rounded-lg transition-colors border border-slate-700">Add Content</button>
         <button onClick={onOpenSettings} className="w-full bg-slate-800 hover:bg-slate-700 text-slate-300 font-medium py-2 rounded-lg transition-colors border border-slate-700">Settings</button>
       </div>
     </aside>
