@@ -31,7 +31,6 @@ export interface Source {
   name: string;
   path?: string;
   parentId?: string; // For nested folders
-  isVirtual?: boolean; // If true, it's a UI-only group
   order?: number; // For custom sorting
 }
 

@@ -305,37 +305,22 @@ const LibrarianApp = () => {
     }
   };
 
-  const handleCreateVirtualGroup = () => {
-    const name = window.prompt("New Group Name:");
-    if (!name?.trim()) return;
-    setSources(prev => [...prev, { id: crypto.randomUUID(), name: name.trim(), isVirtual: true, order: prev.length }]);
-  };
-
-  const handleAssignFolderToGroup = (folderId: string, groupId: string | null) => {
-    setSources(prev => prev.map(s => s.id === folderId ? { ...s, parentId: groupId || undefined } : s));
-  };
-
   const handleUpdateArticle = (id: string, updates: Partial<ArticleMetadata>) => {
     setArticles(prev => prev.map(a => a.id === id ? { ...a, metadata: { ...a.metadata!, ...updates } } : a));
   };
 
   const handleDeleteSource = (id: string) => {
-    const source = sources.find(s => s.id === id);
     if (!window.confirm("Remove this entry?")) return;
-    if (source?.isVirtual) {
-        setSources(prev => prev.filter(s => s.id !== id).map(s => s.parentId === id ? { ...s, parentId: undefined } : s));
-    } else {
-        const toDelete = new Set<string>([id]);
-        const findChildren = (pid: string): void => {
-            (sources.filter(s => s.parentId === pid) as Source[]).forEach(c => {
-                toDelete.add(c.id);
-                findChildren(c.id);
-            });
-        };
-        findChildren(id);
-        setArticles(prev => prev.filter(a => !toDelete.has(a.sourceId)));
-        setSources(prev => prev.filter(s => !toDelete.has(s.id)));
-    }
+    const toDelete = new Set<string>([id]);
+    const findChildren = (pid: string): void => {
+        (sources.filter(s => s.parentId === pid) as Source[]).forEach(c => {
+            toDelete.add(c.id);
+            findChildren(c.id);
+        });
+    };
+    findChildren(id);
+    setArticles(prev => prev.filter(a => !toDelete.has(a.sourceId)));
+    setSources(prev => prev.filter(s => !toDelete.has(s.id)));
   };
 
   const filteredArticles = useMemo(() => {
@@ -370,7 +355,6 @@ const LibrarianApp = () => {
         onSetActiveSource={setActiveSourceId} onSetActiveCategory={setActiveCategoryId} onOpenAddModal={() => setIsAddSourceModalOpen(true)}
         onOpenGenerateModal={() => setIsGenerateModalOpen(true)} onOpenSettings={() => setIsSettingsOpen(true)} onOpenNote={setSelectedNote}
         onDeleteSource={handleDeleteSource} isGenerateDisabled={checkedArticleIds.size === 0} onRefreshSource={handleAddSource}
-        onCreateGroup={handleCreateVirtualGroup} onMoveSource={handleAssignFolderToGroup}
       />
 
       <ArticleList 
