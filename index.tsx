@@ -1,6 +1,7 @@
 
 import React, { useState, useEffect, useMemo, Suspense, useRef } from 'react';
 import { createRoot } from 'react-dom/client';
+import JSZip from 'jszip';
 import { Article, Source, ArticleMetadata, Note, NoteType } from './types';
 import { Sidebar } from './components/Sidebar';
 import { ArticleList } from './components/ArticleList';
@@ -77,6 +78,58 @@ const LibrarianApp = () => {
     bibtex: ""
   });
 
+  const getDescendantSourceIds = (id: string, srcList: Source[]): string[] => {
+      const results = [id];
+      (srcList.filter(s => s.parentId === id) as Source[]).forEach(child => {
+          results.push(...getDescendantSourceIds(child.id, srcList));
+      });
+      return results;
+  };
+
+  const handleExportZip = async (sourceId?: string) => {
+    setIsLoading(true);
+    setLoadingMessage(sourceId ? 'Zipping Folder...' : 'Zipping Library...');
+    try {
+      const zip = new JSZip();
+      let targetArticles = articles;
+      
+      if (sourceId) {
+        const branchIds = getDescendantSourceIds(sourceId, sources);
+        targetArticles = articles.filter(a => branchIds.includes(a.sourceId));
+      }
+
+      let addedCount = 0;
+      targetArticles.forEach(art => {
+        const file = fileMap.current.get(art.id);
+        if (file) {
+          // Use the relative filePath to maintain original structure inside the zip
+          zip.file(art.filePath, file);
+          addedCount++;
+        }
+      });
+
+      if (addedCount === 0) {
+        alert("No linked files found to export. Please 'Sync' your folders if they were recently imported.");
+        return;
+      }
+
+      const blob = await zip.generateAsync({ type: "blob" });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = sourceId 
+        ? `${sources.find(s => s.id === sourceId)?.name || 'folder'}.zip`
+        : 'library_export.zip';
+      a.click();
+      URL.revokeObjectURL(url);
+    } catch (err) {
+      console.error(err);
+      alert("ZIP creation failed.");
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
   const handleAddSource = async (e: React.ChangeEvent<HTMLInputElement>, refreshSourceId?: string) => {
     const files = e.target.files;
     if (!files || files.length === 0) return;
@@ -94,14 +147,6 @@ const LibrarianApp = () => {
         let currentSources = [...sources];
         let newSourcesAdded: Source[] = [];
         
-        const getDescendantSourceIds = (id: string, srcList: Source[]): string[] => {
-            const results = [id];
-            (srcList.filter(s => s.parentId === id) as Source[]).forEach(child => {
-                results.push(...getDescendantSourceIds(child.id, srcList));
-            });
-            return results;
-        };
-
         if (refreshSourceId) {
             const branchIds = getDescendantSourceIds(refreshSourceId, sources);
             currentArticles = articles.filter(a => !branchIds.includes(a.sourceId));
@@ -355,6 +400,7 @@ const LibrarianApp = () => {
         onSetActiveSource={setActiveSourceId} onSetActiveCategory={setActiveCategoryId} onOpenAddModal={() => setIsAddSourceModalOpen(true)}
         onOpenGenerateModal={() => setIsGenerateModalOpen(true)} onOpenSettings={() => setIsSettingsOpen(true)} onOpenNote={setSelectedNote}
         onDeleteSource={handleDeleteSource} isGenerateDisabled={checkedArticleIds.size === 0} onRefreshSource={handleAddSource}
+        onExportZip={handleExportZip}
       />
 
       <ArticleList 
@@ -371,6 +417,7 @@ const LibrarianApp = () => {
             const a = document.createElement('a'); a.href = url; a.download = 'librarian_session.json'; a.click();
             URL.revokeObjectURL(url);
         }}
+        onExportZip={() => handleExportZip()}
         onImportSession={() => {
             const input = document.createElement('input'); input.type = 'file'; input.accept = '.json';
             input.onchange = async (e) => {

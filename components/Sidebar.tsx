@@ -18,6 +18,7 @@ interface SidebarProps {
   onDeleteSource: (id: string) => void;
   isGenerateDisabled: boolean;
   onRefreshSource: (e: React.ChangeEvent<HTMLInputElement>, sourceId: string) => void;
+  onExportZip: (sourceId: string) => void;
 }
 
 const SourceTreeItem: React.FC<{
@@ -29,14 +30,15 @@ const SourceTreeItem: React.FC<{
   onSelect: (id: string) => void;
   onDelete: (id: string) => void;
   onRefresh: (e: React.ChangeEvent<HTMLInputElement>, id: string) => void;
-}> = ({ source, allSources, articles, activeSourceId, depth, onSelect, onDelete, onRefresh }) => {
+  onExportZip: (id: string) => void;
+}> = ({ source, allSources, articles, activeSourceId, depth, onSelect, onDelete, onRefresh, onExportZip }) => {
   const [isExpanded, setIsExpanded] = useState(true);
   
   const children = allSources.filter(s => s.parentId === source.id);
   const hasChildren = children.length > 0;
   const count = articles.filter(a => a.sourceId === source.id).length;
 
-  // Sync button only for root folders (depth 0)
+  // Sync and Zip buttons only for root folders (depth 0)
   const isRefreshable = depth === 0;
 
   return (
@@ -55,12 +57,17 @@ const SourceTreeItem: React.FC<{
         
         <div className="flex items-center opacity-0 group-hover:opacity-100 transition-opacity pr-1">
           {isRefreshable && (
-            <label className="p-1.5 text-slate-400 hover:text-emerald-400 cursor-pointer" title="Sync Master Folder">
-              <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" strokeWidth={2} /></svg>
-              <input type="file" className="hidden" multiple webkitdirectory="" directory="" onChange={(e) => onRefresh(e, source.id)} />
-            </label>
+            <>
+              <button onClick={(e) => { e.stopPropagation(); onExportZip(source.id); }} className="p-1.5 text-slate-400 hover:text-indigo-400" title="Export Folder as ZIP">
+                <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path d="M12 10v6m0 0l-3-3m3 3l3-3m2 8H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" strokeWidth={2} /></svg>
+              </button>
+              <label className="p-1.5 text-slate-400 hover:text-emerald-400 cursor-pointer" title="Sync Master Folder">
+                <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" strokeWidth={2} /></svg>
+                <input type="file" className="hidden" multiple webkitdirectory="" directory="" onChange={(e) => onRefresh(e, source.id)} />
+              </label>
+            </>
           )}
-          <button onClick={(e) => { e.stopPropagation(); onDelete(source.id); }} className="p-1.5 text-slate-400 hover:text-red-400">
+          <button onClick={(e) => { e.stopPropagation(); onDelete(source.id); }} className="p-1.5 text-slate-400 hover:text-red-400" title="Remove Root">
              <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7" strokeWidth={2} /></svg>
           </button>
         </div>
@@ -68,7 +75,7 @@ const SourceTreeItem: React.FC<{
       {isExpanded && hasChildren && (
         <div className="ml-2">
             {children.map(c => (
-                <SourceTreeItem key={c.id} source={c} allSources={allSources} articles={articles} activeSourceId={activeSourceId} depth={depth + 1} onSelect={onSelect} onDelete={onDelete} onRefresh={onRefresh} />
+                <SourceTreeItem key={c.id} source={c} allSources={allSources} articles={articles} activeSourceId={activeSourceId} depth={depth + 1} onSelect={onSelect} onDelete={onDelete} onRefresh={onRefresh} onExportZip={onExportZip} />
             ))}
         </div>
       )}
@@ -77,7 +84,7 @@ const SourceTreeItem: React.FC<{
 };
 
 export const Sidebar: React.FC<SidebarProps> = ({
-  sources, articles, notes = [], categories, activeSourceId, activeCategoryId, onSetActiveSource, onSetActiveCategory, onOpenAddModal, onOpenGenerateModal, onOpenSettings, onOpenNote, onDeleteSource, isGenerateDisabled, onRefreshSource
+  sources, articles, notes = [], categories, activeSourceId, activeCategoryId, onSetActiveSource, onSetActiveCategory, onOpenAddModal, onOpenGenerateModal, onOpenSettings, onOpenNote, onDeleteSource, isGenerateDisabled, onRefreshSource, onExportZip
 }) => {
   const libraryFolders = sources.filter(s => !s.parentId);
 
@@ -99,7 +106,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
         <div className="mb-6">
             <div className="px-6 mb-2 text-[10px] font-bold uppercase text-slate-500 tracking-wider">Library Roots</div>
             {libraryFolders.map(s => (
-                <SourceTreeItem key={s.id} source={s} allSources={sources} articles={articles} activeSourceId={activeSourceId} depth={0} onSelect={onSetActiveSource} onDelete={onDeleteSource} onRefresh={onRefreshSource} />
+                <SourceTreeItem key={s.id} source={s} allSources={sources} articles={articles} activeSourceId={activeSourceId} depth={0} onSelect={onSetActiveSource} onDelete={onDeleteSource} onRefresh={onRefreshSource} onExportZip={onExportZip} />
             ))}
         </div>
         
