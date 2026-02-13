@@ -102,12 +102,8 @@ const LibrarianApp = () => {
             return results;
         };
 
-        // If refreshing, capture the old branch and metadata
-        let oldBranchArticles: Article[] = [];
         if (refreshSourceId) {
             const branchIds = getDescendantSourceIds(refreshSourceId, sources);
-            oldBranchArticles = articles.filter(a => branchIds.includes(a.sourceId));
-            // Temporarily remove branch articles and sub-sources
             currentArticles = articles.filter(a => !branchIds.includes(a.sourceId));
             currentSources = sources.filter(s => s.id === refreshSourceId || !branchIds.includes(s.id));
         }
@@ -128,7 +124,6 @@ const LibrarianApp = () => {
         for (const file of fileList) {
             if (!file.name.toLowerCase().endsWith('.pdf')) continue;
             let relativePath = (file as any).webkitRelativePath || file.name;
-
             const pathParts = relativePath.split('/');
             let currentParentId: string | undefined = refreshSourceId || undefined;
 
@@ -142,9 +137,7 @@ const LibrarianApp = () => {
                 currentParentId = getOrCreateSourceInWorking("Master Library", undefined);
             }
 
-            // METADATA PROTECTION: Search in the articles state (master list) by path
             const match = articles.find(a => a.filePath === relativePath);
-
             if (match) {
                 currentArticles.push({ ...match, sourceId: currentParentId! });
                 fileMap.current.set(match.id, file);
@@ -216,27 +209,71 @@ const LibrarianApp = () => {
         let notesOutput = "";
         const format = options.format || '.md';
         
-        if (format === '.md') notesOutput += "# Librarian Collected Notes\n\n";
-        else notesOutput += "\\section{Librarian Collected Notes}\n\n";
+        // Sorting sequence buckets: General -> Category -> Article
+        const generalNotes = notes.filter(n => n.type === 'general' && options.notesOptions.general);
+        const categoryNotes = notes.filter(n => n.type === 'category' && options.notesOptions.category);
+        const articleNotes = notes.filter(n => n.type === 'article' && options.notesOptions.article && checkedArticleIds.has(n.targetId || ''));
 
-        const filteredNotes = notes.filter(n => {
-            if (n.type === 'general' && options.notesOptions.general) return true;
-            if (n.type === 'category' && options.notesOptions.category) return true;
-            if (n.type === 'article' && options.notesOptions.article) {
-                return checkedArticleIds.has(n.targetId || '');
-            }
-            return false;
-        });
+        if (format === '.tex') {
+            notesOutput += `\\documentclass{article}\n\n\\title{Session Report}\n\\date{\\today}\n\n\\begin{document}\n\n\\maketitle\n\n`;
+        } else {
+            notesOutput += `# Session Report\n\n`;
+        }
 
-        filteredNotes.forEach(n => {
-            if (format === '.md') {
-                notesOutput += `## ${n.title}\n**Context**: ${n.type}${n.targetId ? ' [' + n.targetId + ']' : ''}\n\n${n.content}\n\n---\n\n`;
+        // General Notes
+        if (generalNotes.length > 0) {
+            if (format === '.tex') {
+                notesOutput += `\\section{General Notes}\n`;
+                generalNotes.forEach(n => {
+                    notesOutput += `\\subsection{${n.title}}\n${n.content}\n\n`;
+                });
             } else {
-                notesOutput += `\\subsection{${n.title}}\n\\textbf{Context}: ${n.type}${n.targetId ? ' [' + n.targetId + ']' : ''}\n\n${n.content}\n\n`;
+                notesOutput += `## General Notes\n\n`;
+                generalNotes.forEach(n => {
+                    notesOutput += `### ${n.title}\n${n.content}\n\n`;
+                });
             }
-        });
+        }
 
-        const notesBlob = new Blob([notesOutput], { type: 'text/plain' });
+        // Category Notes
+        if (categoryNotes.length > 0) {
+            if (format === '.tex') {
+                notesOutput += `\\section{Category Notes}\n`;
+                categoryNotes.forEach(n => {
+                    notesOutput += `\\subsection{${n.targetId || 'Unknown Category'}}\n\\textbf{Note: ${n.title}}\\\\\n${n.content}\n\n`;
+                });
+            } else {
+                notesOutput += `## Category Notes\n\n`;
+                categoryNotes.forEach(n => {
+                    notesOutput += `### ${n.targetId || 'Unknown Category'}: ${n.title}\n${n.content}\n\n`;
+                });
+            }
+        }
+
+        // Article Notes
+        if (articleNotes.length > 0) {
+            if (format === '.tex') {
+                notesOutput += `\\section{Article Notes}\n`;
+                articleNotes.forEach(n => {
+                    const art = articles.find(a => a.id === n.targetId);
+                    const artName = art?.metadata?.title || art?.fileName || 'Unknown Article';
+                    notesOutput += `\\subsection{${artName}}\n\\textbf{Note: ${n.title}}\\\\\n${n.content}\n\n`;
+                });
+            } else {
+                notesOutput += `## Article Notes\n\n`;
+                articleNotes.forEach(n => {
+                    const art = articles.find(a => a.id === n.targetId);
+                    const artName = art?.metadata?.title || art?.fileName || 'Unknown Article';
+                    notesOutput += `### ${artName}: ${n.title}\n${n.content}\n\n`;
+                });
+            }
+        }
+
+        if (format === '.tex') {
+            notesOutput += `\n\\end{document}`;
+        }
+
+        const notesBlob = new Blob([notesOutput], { type: format === '.tex' ? 'text/x-tex' : 'text/markdown' });
         const notesUrl = URL.createObjectURL(notesBlob);
         const notesLink = document.createElement('a');
         notesLink.href = notesUrl;
@@ -262,7 +299,7 @@ const LibrarianApp = () => {
 
   const handleDeleteSource = (id: string) => {
     const source = sources.find(s => s.id === id);
-    if (!window.confirm("Remove this entry from Librarian? Files on disk will not be touched.")) return;
+    if (!window.confirm("Remove this entry?")) return;
     if (source?.isVirtual) {
         setSources(prev => prev.filter(s => s.id !== id).map(s => s.parentId === id ? { ...s, parentId: undefined } : s));
     } else {
@@ -329,9 +366,9 @@ const LibrarianApp = () => {
                     setArticles(data.articles); 
                     setNotes(data.notes || []); 
                     fileMap.current.clear();
-                    alert("Session Restored. Relink your PDFs by clicking Sync on root folders."); 
+                    alert("Session Restored. Relink PDFs by syncing root folders."); 
                 }
-              } catch (err) { alert("Invalid session file."); }
+              } catch (err) { alert("Invalid file."); }
             };
             input.click();
         }}
@@ -356,7 +393,7 @@ const LibrarianApp = () => {
         }} 
       />
 
-      <AddSourceModal isOpen={isAddSourceModalOpen} onClose={() => setIsAddSourceModalOpen(false)} onAddSource={handleAddSource} onAddPDF={() => alert("Please add the root folder to maintain path integrity.")} />
+      <AddSourceModal isOpen={isAddSourceModalOpen} onClose={() => setIsAddSourceModalOpen(false)} onAddSource={handleAddSource} onAddPDF={() => alert("Root folder import recommended.")} />
       <GenerateModal isOpen={isGenerateModalOpen} onClose={() => setIsGenerateModalOpen(false)} onConfirm={handleGenerateOutput} />
       
       {activeEditorNote && (
@@ -372,7 +409,6 @@ const LibrarianApp = () => {
 
       <NoteViewerModal note={selectedNote} onClose={() => setSelectedNote(null)} onUpdateTitle={(id, t) => setNotes(prev => prev.map(n => n.id === id ? {...n, title: t} : n))} onDelete={(id) => setNotes(prev => prev.filter(n => n.id !== id))} onEdit={(n) => { setSelectedNote(null); setIsEditingNote(true); setActiveEditorNote(n); }} />
       
-      {/* Floating Note Button */}
       <button 
         onClick={() => setIsNotebookSetupOpen(true)}
         className="fixed bottom-6 right-6 w-14 h-14 bg-indigo-600 hover:bg-indigo-700 text-white rounded-full shadow-2xl flex items-center justify-center transition-all active:scale-95 z-[100]"
