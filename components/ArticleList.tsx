@@ -1,3 +1,4 @@
+
 import React, { useMemo } from 'react';
 import { Article } from '../types';
 
@@ -17,6 +18,7 @@ interface ArticleListProps {
   onToggleGroup: () => void;
   sortConfig: { key: string; direction: 'asc' | 'desc' } | null;
   onSort: (key: string) => void;
+  fileStatusMap: Map<string, File>;
 }
 
 const getCategoryStyle = (category: string) => {
@@ -59,7 +61,8 @@ export const ArticleList: React.FC<ArticleListProps> = ({
   isGrouped,
   onToggleGroup,
   sortConfig,
-  onSort
+  onSort,
+  fileStatusMap
 }) => {
 
   const groupedArticles = useMemo(() => {
@@ -85,13 +88,15 @@ export const ArticleList: React.FC<ArticleListProps> = ({
 
   const handleToggleAll = () => {
       if (areAllSelected) {
-          onToggleAll([]); // Deselect all visible
+          onToggleAll([]); 
       } else {
-          onToggleAll(articles.map(a => a.id)); // Select all visible
+          onToggleAll(articles.map(a => a.id)); 
       }
   };
 
   const renderRow = (article: Article) => {
+     const isDisconnected = !fileStatusMap.has(article.id);
+
      return (
       <tr 
         key={article.id} 
@@ -108,8 +113,13 @@ export const ArticleList: React.FC<ArticleListProps> = ({
         </td>
         <td className="px-6 py-4">
           <div className="flex flex-col gap-1.5">
-            <div className="text-sm font-semibold text-slate-900 dark:text-slate-100 line-clamp-2">
+            <div className="text-sm font-semibold text-slate-900 dark:text-slate-100 line-clamp-2 flex items-center gap-2">
               {article.metadata?.title || article.fileName}
+              {isDisconnected && (
+                  <span title="File not linked to local disk. Please Sync the source folder." className="inline-flex items-center px-1.5 py-0.5 rounded text-[9px] font-bold bg-red-100 text-red-600 border border-red-200 uppercase">
+                    Unlinked
+                  </span>
+              )}
             </div>
             
             <div className="flex flex-wrap gap-1">
@@ -164,7 +174,7 @@ export const ArticleList: React.FC<ArticleListProps> = ({
           </span>
           <input 
             type="text" 
-            placeholder="Search by title, author, journal, year, category, keywords..."
+            placeholder="Search documents..."
             className="block w-full pl-10 pr-3 py-2 border border-slate-300 dark:border-slate-700 rounded-lg bg-slate-50 dark:bg-slate-800 text-slate-900 dark:text-white placeholder-slate-400 focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-transparent transition-all"
             value={searchQuery}
             onChange={(e) => onSearchChange(e.target.value)}

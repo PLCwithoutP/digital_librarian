@@ -24,7 +24,9 @@ const LibrarianApp = () => {
   const [sortConfig, setSortConfig] = useState<{ key: string; direction: 'asc' | 'desc' } | null>(null);
   const [checkedArticleIds, setCheckedArticleIds] = useState<Set<string>>(new Set<string>());
   
+  // The registry that links an Article ID (from metadata) to a live browser File object.
   const fileMap = useRef<Map<string, File>>(new Map());
+  const [, setFileTick] = useState(0);
 
   const [isLoading, setIsLoading] = useState(false);
   const [loadingMessage, setLoadingMessage] = useState('');
@@ -76,18 +78,29 @@ const LibrarianApp = () => {
     bibtex: ""
   });
 
+  /**
+   * CORE LOGIC: Path-to-ID Registry
+   * Matches incoming files to existing metadata based on unique filePaths.
+   */
   const handleAddSource = async (e: React.ChangeEvent<HTMLInputElement>, refreshSourceId?: string) => {
     const files = e.target.files;
     if (!files || files.length === 0) return;
+
+    if (refreshSourceId && !window.confirm("Do you want to refresh this folder and re-link files? Existing metadata will be preserved.")) {
+      return;
+    }
+
     setIsLoading(true);
-    setLoadingMessage(refreshSourceId ? 'Syncing library content...' : 'Indexing folder...');
+    setLoadingMessage(refreshSourceId ? 'Re-linking physical files...' : 'Mapping library paths...');
     
     try {
         const fileList: File[] = Array.from(files);
         const newSources: Source[] = [];
         const newArticlesList: Article[] = [];
-        const existingPaths = new Set(articles.map(a => a.filePath));
-        const refreshSource = refreshSourceId ? sources.find(s => s.id === refreshSourceId) : null;
+        
+        // Build a registry of current paths to avoid duplicates and allow re-linking
+        const pathRegistry = new Map<string, string>(); // filePath -> ArticleID
+        articles.forEach(a => pathRegistry.set(a.filePath, a.id));
 
         const getOrCreateSource = (folderName: string, parentId: string | undefined): string => {
             let existing = sources.find(s => s.name === folderName && s.parentId === parentId);
@@ -99,33 +112,24 @@ const LibrarianApp = () => {
             return id;
         };
 
-        let newCount = 0;
-        let updateCount = 0;
+        let newEntriesCount = 0;
+        let reLinkedCount = 0;
 
         for (const file of fileList) {
             if (!file.name.toLowerCase().endsWith('.pdf')) continue;
-            let relativePath = (file as any).webkitRelativePath || file.name;
+            const relativePath = (file as any).webkitRelativePath || file.name;
             
-            // Normalize path for Sync: 
-            // If we are syncing "MyPapers", and path is "MyPapers/file.pdf", 
-            // we should treat the internal path as just "file.pdf" to match existing storage.
-            if (refreshSource) {
-                const prefix = refreshSource.name + "/";
-                if (relativePath.startsWith(prefix)) {
-                    relativePath = relativePath.substring(prefix.length);
-                }
-            }
-
-            // DEDUPLICATION: If path exists, just re-link the file handle
-            if (existingPaths.has(relativePath)) {
-                const existingArt = articles.find(a => a.filePath === relativePath);
-                if (existingArt) {
-                    fileMap.current.set(existingArt.id, file);
-                    updateCount++;
-                }
+            // CHECK REGISTRY
+            const existingId = pathRegistry.get(relativePath);
+            
+            if (existingId) {
+                // PATH MATCH FOUND: Update the memory pointer to the actual File object
+                fileMap.current.set(existingId, file);
+                reLinkedCount++;
                 continue;
             }
 
+            // PATH IS NEW: Create new metadata entry
             const pathParts = relativePath.split('/');
             let currentParentId: string | undefined = refreshSourceId || undefined;
 
@@ -135,8 +139,7 @@ const LibrarianApp = () => {
                     currentParentId = getOrCreateSource(folderName, currentParentId);
                 }
             } else if (!refreshSourceId) {
-                // If it's a flat file upload or single folder
-                currentParentId = getOrCreateSource("Root", undefined);
+                currentParentId = getOrCreateSource("Imported Folder", undefined);
             }
 
             const articleId = crypto.randomUUID();
@@ -152,18 +155,21 @@ const LibrarianApp = () => {
             };
             fileMap.current.set(articleId, file);
             newArticlesList.push(newArt);
-            newCount++;
+            newEntriesCount++;
         }
 
         if (newSources.length > 0) setSources(prev => [...prev, ...newSources]);
         if (newArticlesList.length > 0) setArticles(prev => [...prev, ...newArticlesList]);
         
-        if (refreshSourceId) {
-            alert(`Sync Finished!\nNew files: ${newCount}\nRe-linked: ${updateCount}`);
+        // Trigger UI refresh for link status
+        setFileTick(t => t + 1);
+
+        if (reLinkedCount > 0 || newEntriesCount > 0) {
+            alert(`Process Complete!\n- Re-linked to existing IDs: ${reLinkedCount}\n- New PDFs discovered: ${newEntriesCount}`);
         }
     } catch (err) {
         console.error(err);
-        alert("Action failed. Browser folder access may have timed out.");
+        alert("Action failed. Browser folder access might have expired.");
     } finally {
         setIsLoading(false);
         if (e.target) e.target.value = "";
@@ -171,7 +177,7 @@ const LibrarianApp = () => {
   };
 
   const handleCreateVirtualGroup = () => {
-    const name = window.prompt("New Group Name:");
+    const name = window.prompt("Group Name:");
     if (!name?.trim()) return;
     setSources(prev => [...prev, { id: crypto.randomUUID(), name: name.trim(), isVirtual: true, order: prev.length }]);
   };
@@ -235,10 +241,11 @@ const LibrarianApp = () => {
         })}
         onToggleAll={(ids) => setCheckedArticleIds(new Set(ids))}
         searchQuery={searchQuery} onSearchChange={setSearchQuery}
+        fileStatusMap={fileMap.current}
         onSaveSession={() => {
             const blob = new Blob([JSON.stringify({ sources, articles, notes }, null, 2)], { type: 'application/json' });
             const url = URL.createObjectURL(blob);
-            const a = document.createElement('a'); a.href = url; a.download = 'library_backup.json'; a.click();
+            const a = document.createElement('a'); a.href = url; a.download = 'librarian_session.json'; a.click();
             URL.revokeObjectURL(url);
         }}
         onImportSession={() => {
@@ -247,8 +254,15 @@ const LibrarianApp = () => {
               const file = (e.target as HTMLInputElement).files?.[0]; if (!file) return;
               try {
                 const data = JSON.parse(await file.text());
-                if (data.articles) { setSources(data.sources || []); setArticles(data.articles); setNotes(data.notes || []); alert("Session restored! Metadata is back. Please use 'Sync' on folders to re-link your local PDFs."); }
-              } catch (err) { alert("Invalid backup file."); }
+                if (data.articles) { 
+                    setSources(data.sources || []); 
+                    setArticles(data.articles); 
+                    setNotes(data.notes || []); 
+                    fileMap.current.clear(); // Clear old handle pointers
+                    setFileTick(t => t + 1);
+                    alert("Session metadata imported successfully. Your articles are currently 'Unlinked'. Please Sync your library folder to re-pair the PDF files using their unique paths."); 
+                }
+              } catch (err) { alert("Invalid session file."); }
             };
             input.click();
         }}
@@ -266,8 +280,8 @@ const LibrarianApp = () => {
 
       <SettingsModal isOpen={isSettingsOpen} onClose={() => setIsSettingsOpen(false)} currentTheme={theme} onThemeChange={setTheme} />
       <NotebookModal isOpen={isNotebookSetupOpen} onClose={() => setIsNotebookSetupOpen(false)} articles={articles} categories={categories} onConfirm={(type, tid) => setActiveEditorNote({ type, targetId: tid, content: '', title: 'New Note' })} />
-      <AddSourceModal isOpen={isAddSourceModalOpen} onClose={() => setIsAddSourceModalOpen(false)} onAddSource={handleAddSource} onAddPDF={() => alert("Add folders via the sidebar sync for path mapping.")} />
-      <GenerateModal isOpen={isGenerateModalOpen} onClose={() => setIsGenerateModalOpen(false)} onConfirm={() => alert("Export initiated.")} />
+      <AddSourceModal isOpen={isAddSourceModalOpen} onClose={() => setIsAddSourceModalOpen(false)} onAddSource={handleAddSource} onAddPDF={() => alert("Please add the root folder containing your PDFs to ensure unique path mapping.")} />
+      <GenerateModal isOpen={isGenerateModalOpen} onClose={() => setIsGenerateModalOpen(false)} onConfirm={() => alert("Export started.")} />
       
       {activeEditorNote && <NotebookEditor isOpen={!!activeEditorNote} initialData={activeEditorNote} onClose={() => setActiveEditorNote(null)} onSave={(nd) => {
           const nn = { ...nd, id: nd.id || crypto.randomUUID(), createdAt: nd.createdAt || Date.now() } as Note;
@@ -280,7 +294,7 @@ const LibrarianApp = () => {
           <div className="fixed inset-0 z-[100] bg-black/60 flex items-center justify-center backdrop-blur-sm">
               <div className="bg-white dark:bg-slate-900 p-10 rounded-2xl shadow-2xl flex flex-col items-center border border-slate-200 dark:border-slate-800">
                   <div className="w-16 h-16 border-4 border-indigo-500 border-t-transparent rounded-full animate-spin mb-6"></div>
-                  <p className="text-xl font-bold text-slate-900 dark:text-white tracking-widest uppercase">{loadingMessage}</p>
+                  <p className="text-xl font-bold text-slate-900 dark:text-white uppercase tracking-widest">{loadingMessage}</p>
               </div>
           </div>
       )}
@@ -289,6 +303,6 @@ const LibrarianApp = () => {
 };
 
 const App = () => (
-  <Suspense fallback={<div className="h-screen w-screen flex items-center justify-center bg-slate-50">Loading...</div>}><LibrarianApp /></Suspense>
+  <Suspense fallback={<div className="h-screen w-screen flex items-center justify-center bg-slate-50">Initializing...</div>}><LibrarianApp /></Suspense>
 );
 createRoot(document.getElementById('root')!).render(<App />);
