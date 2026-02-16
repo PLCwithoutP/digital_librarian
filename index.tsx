@@ -390,8 +390,40 @@ const LibrarianApp = () => {
         a.metadata?.keywords.some(k => k.toLowerCase().includes(q))
       ));
     }
+
+    // Apply Sorting
+    if (sortConfig) {
+      list = [...list].sort((a, b) => {
+        let valA: any = '';
+        let valB: any = '';
+
+        switch (sortConfig.key) {
+          case 'publication':
+            valA = (a.metadata?.title || a.fileName).toLowerCase();
+            valB = (b.metadata?.title || b.fileName).toLowerCase();
+            break;
+          case 'journal':
+            valA = (a.metadata?.journal || '').toLowerCase();
+            valB = (b.metadata?.journal || '').toLowerCase();
+            break;
+          case 'authors':
+            valA = (a.metadata?.authors.join(', ') || '').toLowerCase();
+            valB = (b.metadata?.authors.join(', ') || '').toLowerCase();
+            break;
+          case 'year':
+            valA = parseInt(a.metadata?.year || '0') || 0;
+            valB = parseInt(b.metadata?.year || '0') || 0;
+            break;
+        }
+
+        if (valA < valB) return sortConfig.direction === 'asc' ? -1 : 1;
+        if (valA > valB) return sortConfig.direction === 'asc' ? 1 : -1;
+        return 0;
+      });
+    }
+
     return [...list];
-  }, [articles, activeSourceId, activeCategoryId, searchQuery, sources]);
+  }, [articles, activeSourceId, activeCategoryId, searchQuery, sources, sortConfig]);
 
   return (
     <div className="flex h-screen w-screen bg-slate-50 dark:bg-slate-950 font-sans text-slate-900 dark:text-slate-100 overflow-hidden">
